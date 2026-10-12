@@ -225,6 +225,46 @@ local function run()
     "subjects and bodies on both sides"
   )
   expect(select(2, preview:gsub("truncated", "")) == 2, "both oversized history sides show truncation")
+  local synthetic = vim.deepcopy(rows.diverged)
+  synthetic.plugin.spec.name = "preview fixture"
+  synthetic.error = "notice first line\nnotice second line"
+  synthetic.log = {
+    "Incoming commits:",
+    "commit 0123456789abcdef\r\nsubject\nbody with 界 and ordinary text\ncommit deadbeef\nbody header follows:\ncommit cafe123",
+    "",
+    "Removed commits:",
+    "commit a1b2c3d4e5\n[history truncated at 1 bytes]",
+  }
+  local synthetic_lines, synthetic_spans = require("fzf-pack.picker").preview(synthetic)
+  expect(#synthetic_spans == 4, "incoming and removed commit headers are recognized")
+  for _, span in ipairs(synthetic_spans) do
+    expect(synthetic_lines[span.row + 1]:match("^commit %x+$"), "only complete log header lines are highlighted")
+    expect(span.start_col == 0 and span.end_col == #synthetic_lines[span.row + 1], "header spans use byte columns")
+  end
+  local unicode_body, body_header = false, false
+  for _, line in ipairs(synthetic_lines) do
+    unicode_body = unicode_body or line == "body with 界 and ordinary text"
+    body_header = body_header or line == "commit cafe123"
+  end
+  expect(unicode_body, "Unicode commit bodies stay intact")
+  expect(
+    body_header and synthetic_lines[synthetic_spans[3].row + 1] == "commit cafe123",
+    "a body line matching the header pattern receives cosmetic highlighting"
+  )
+  expect(synthetic_spans[1].end_col == #"commit 0123456789abcdef", "non-seven-character hashes are supported")
+  expect(
+    table.concat(synthetic_lines, "\n"):find("body with 界 and ordinary text", 1, true) ~= nil,
+    "multibyte body remains in preview"
+  )
+  local metadata_fixture = vim.deepcopy(synthetic)
+  metadata_fixture.log = { "(none)" }
+  metadata_fixture.plugin.spec.src = "commit 123abc"
+  metadata_fixture.plugin.path = "commit deadbeef"
+  local metadata_lines, metadata_spans = require("fzf-pack.picker").preview(metadata_fixture)
+  expect(
+    #metadata_spans == 0 and metadata_lines[#metadata_lines]:find("commit deadbeef", 1, true),
+    "metadata-looking source and path lines are excluded"
+  )
   expect(#table.concat(rows.diverged.log, "\n") <= 2 * opts.max_log_bytes + 512, "history output stays byte bounded")
   local _, tiny_rows =
     collect(false, { rows.rollback.plugin, rows.diverged.plugin }, vim.tbl_extend("force", opts, { max_log_bytes = 1 }))
@@ -395,11 +435,32 @@ local function run()
     end,
   }
   local picker = require("fzf-pack.picker")
+  vim.api.nvim_set_hl(0, "FzfPackTestIdentifier", { fg = "#2468ac", ctermfg = 25 })
+  vim.api.nvim_set_hl(0, "Identifier", { link = "FzfPackTestIdentifier" })
+  picker.open(result, opts, true)
+  local generated_commit = vim.api.nvim_get_hl(0, { name = "FzfPackCommit" })
+  expect(
+    generated_commit.bold and generated_commit.fg == 0x2468ac,
+    "default commit highlight is bold and theme accented"
+  )
+  expect(generated_commit.bg == nil and generated_commit.ctermbg == nil, "default commit highlight has no background")
+  vim.api.nvim_set_hl(0, "FzfPackTestIdentifier", { fg = "#13579b", ctermfg = 24 })
+  vim.api.nvim_exec_autocmds("ColorScheme", { modeline = false })
+  expect(
+    vim.api.nvim_get_hl(0, { name = "FzfPackCommit" }).fg == 0x13579b,
+    "generated commit highlight follows colorscheme changes"
+  )
+  vim.api.nvim_set_hl(0, "FzfPackTestCommitOverride", { fg = "#abcdef", bold = false })
+  vim.api.nvim_set_hl(0, "FzfPackCommit", { link = "FzfPackTestCommitOverride" })
   vim.api.nvim_set_hl(0, "FzfPackCurrent", { fg = "#123456" })
   picker.open(result, opts, true)
   expect(captured[2].fzf_opts["--multi"], "multi selection enabled")
   expect(captured[2].fzf_opts["--ansi"], "ANSI status highlighting enabled")
   expect(vim.api.nvim_get_hl(0, { name = "FzfPackCurrent" }).fg == 0x123456, "custom status highlight is preserved")
+  expect(
+    vim.api.nvim_get_hl(0, { name = "FzfPackCommit", link = true }).link == "FzfPackTestCommitOverride",
+    "custom linked commit highlight is preserved"
+  )
   local highlighted_statuses = {}
   for _, entry in ipairs(captured[1]) do
     local id, name, visible = entry:match("^(%d+)\t([^\t]+)\t(.+)$")
@@ -432,6 +493,10 @@ local function run()
   expect(
     vim.api.nvim_get_hl(0, { name = "FzfPackCurrent" }).fg == 0x123456,
     "custom status highlight survives colorscheme changes"
+  )
+  expect(
+    vim.api.nvim_get_hl(0, { name = "FzfPackCommit", link = true }).link == "FzfPackTestCommitOverride",
+    "custom linked commit highlight survives colorscheme changes"
   )
   local original = pack.review
   local selected
@@ -480,7 +545,12 @@ local function run()
   long.plugin.spec.name = string.rep("界", 20)
   local short = vim.deepcopy(rows.pinned)
   short.plugin.spec.name = "short"
-  picker.open({ long, short }, opts, true)
+  short.log = vim.deepcopy(rows.diverged.log)
+  local broken_preview = vim.deepcopy(rows.broken)
+  broken_preview.plugin.spec.name = "broken preview"
+  local current_preview = vim.deepcopy(rows.pinned)
+  current_preview.plugin.spec.name = "current preview"
+  picker.open({ long, short, broken_preview, current_preview }, opts, true)
   local function state_column(entry)
     local visible = assert(entry:match("^%d+\t[^\t]+\t(.+)$"))
     return vim.fn.strdisplaywidth(assert(visible:match("^(.-)active"))), visible
@@ -522,6 +592,52 @@ local function run()
   expect(
     rendered:find("short (active)", 1, true) and rendered:find(old, 1, true),
     "custom preview survives fzf-lua default merge and renders plugin details"
+  )
+  local preview_namespace = vim.api.nvim_get_namespaces()["fzf-pack-commit-headers"]
+  local marks = vim.api.nvim_buf_get_extmarks(buffer, preview_namespace, 0, -1, { details = true })
+  expect(#marks > 0, "incoming and removed preview headers receive extmarks")
+  local mark_lines = {}
+  for _, mark in ipairs(marks) do
+    mark_lines[mark[2]] = true
+    expect(mark[4].end_col > mark[3], "commit extmarks cover a complete nonempty header")
+  end
+  local rendered_lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
+  local removed_index
+  for index, line in ipairs(rendered_lines) do
+    if line:match("^Removed commits") then
+      removed_index = index
+      break
+    end
+  end
+  local incoming_header, removed_header = false, false
+  for line_number, line in ipairs(rendered_lines) do
+    if line:match("^commit %x+$") and mark_lines[line_number - 1] then
+      incoming_header = incoming_header or line_number < (removed_index or #rendered_lines)
+      removed_header = removed_header or (removed_index ~= nil and line_number > removed_index)
+    end
+  end
+  expect(incoming_header and removed_header, "both incoming and removed headers are marked")
+  for line_number, line in ipairs(rendered_lines) do
+    if line:find("incoming body", 1, true) or line:find("removed body", 1, true) then
+      expect(not mark_lines[line_number - 1], "ordinary commit bodies remain unhighlighted")
+    end
+  end
+  local function preview_entry(name)
+    for _, entry in ipairs(captured[1]) do
+      if entry:match("^%d+\t([^\t]+)") == name then
+        return entry
+      end
+    end
+  end
+  instance:populate_preview_buf(preview_entry("broken preview"))
+  expect(
+    #vim.api.nvim_buf_get_extmarks(buffer, preview_namespace, 0, -1, {}) == 0,
+    "switching to an error preview clears stale header marks"
+  )
+  instance:populate_preview_buf(preview_entry("current preview"))
+  expect(
+    #vim.api.nvim_buf_get_extmarks(buffer, preview_namespace, 0, -1, {}) == 0,
+    "switching to a no-history preview clears stale header marks"
   )
   vim.api.nvim_buf_delete(buffer, { force = true })
 

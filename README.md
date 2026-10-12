@@ -57,6 +57,10 @@ green and update to red; rollback/diverged use the warning color and errors use
 red. These groups link to Neovim's diagnostic highlights, so themes control
 their colors. Reopen the picker after changing colorschemes to refresh colors.
 Override a status highlight with `vim.api.nvim_set_hl(0, "FzfPackUpdate", { fg = "#ff0000" })`.
+Commit headers in incoming and removed history use the bold `FzfPackCommit`
+highlight, which takes its foreground from `Identifier`. Override it with
+`vim.api.nvim_set_hl(0, "FzfPackCommit", { fg = "#66ccff", bold = true })`.
+An identical `commit <hex>` line in a commit body is highlighted as well.
 
 `:PackUpdate` reports completed and total plugin checks. `:PackCancel` stops
 queued work, signals active Git processes, and prevents canceled results from

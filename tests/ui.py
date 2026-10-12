@@ -132,6 +132,28 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert update_attribute != current_attribute, updated
         beta_name_attribute, _ = row_attributes(updated, "beta", "update")
         assert update_attribute != beta_name_attribute, updated
+
+        def assert_commit_rendered(screen_state, subject, body):
+            screen = screen_state["screen"]
+            attributes = screen_state["attributes"]
+            header_position = subject_position = body_position = None
+            for row_index, line in enumerate(screen):
+                header = re.search(r"commit [0-9a-f]+", line.rstrip())
+                if header:
+                    header_position = (row_index, line.index(header.group(0)))
+                if subject in line:
+                    subject_position = (row_index, line.index(subject))
+                if body in line:
+                    body_position = (row_index, line.index(body))
+            assert header_position and subject_position and body_position, screen
+            header_attribute = attributes[header_position[0]][header_position[1]]
+            subject_attribute = attributes[subject_position[0]][subject_position[1]]
+            body_attribute = attributes[body_position[0]][body_position[1]]
+            assert header_attribute != subject_attribute and header_attribute != body_attribute, screen
+            highlight = screen_state["commit_highlight"]
+            assert highlight.get("bold") is True and highlight.get("fg") == 0x2468AC, highlight
+
+        assert_commit_rendered(updated, "UI incoming subject", "UI incoming body")
         before_tab = "\n".join(updated["screen"])
         send(b"\t")
         marked = wait(lambda s: terminal(s) and "3/3 (1)" in "\n".join(s.get("screen", [])))
@@ -171,6 +193,21 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
             path = env["XDG_DATA_HOME"] + "/nvim/site/pack/core/opt/" + name
             head = subprocess.check_output(["git", "-C", path, "rev-parse", "HEAD"], text=True).strip()
             assert head == final["old"]
+        alpha_path = Path(env["XDG_DATA_HOME"]) / "nvim/site/pack/core/opt/alpha"
+        subprocess.run(["git", "-C", str(alpha_path), "reset", "--hard", final["new"]],
+                       check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["git", "-C", str(Path(tmp) / "upstream"), "update-ref",
+                        "refs/heads/main", final["old"]], check=True, stdout=subprocess.DEVNULL)
+        send(b":PackUpdate\r")
+        removed = wait(lambda s: terminal(s)
+                       and "Removed commits" in "\n".join(s.get("screen", []))
+                       and "UI incoming body" in "\n".join(s.get("screen", [])))
+        removed_screen = "\n".join(removed["screen"])
+        assert "UI incoming subject" in removed_screen, removed_screen
+        assert_commit_rendered(removed, "UI incoming subject", "UI incoming body")
+        capture("removed-picker")
+        send(b"\x1b")
+        assert wait(closed)["unchanged"]
         artifact = Path(tempfile.gettempdir()) / "fzf-pack-picker-screen.txt"
         artifact.write_text(update_screen)
         capture("success")

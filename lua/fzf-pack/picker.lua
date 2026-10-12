@@ -1,5 +1,7 @@
 local M = {}
 local highlight_autocmd = false
+local commit_highlight_namespace
+local generated_commit_highlight
 
 local status_highlights = {
   current = "FzfPackCurrent",
@@ -17,9 +19,37 @@ local highlight_links = {
   FzfPackError = "DiagnosticError",
 }
 
+local function commit_highlight()
+  local identifier = vim.api.nvim_get_hl(0, { name = "Identifier", link = false })
+  local highlight = { bold = true }
+  if identifier.fg then
+    highlight.fg = identifier.fg
+  end
+  if identifier.ctermfg then
+    highlight.ctermfg = identifier.ctermfg
+  end
+  return highlight
+end
+
+local function refresh_commit_highlight()
+  if not generated_commit_highlight then
+    return
+  end
+  local current = vim.api.nvim_get_hl(0, { name = "FzfPackCommit", link = true })
+  if next(current) == nil or vim.deep_equal(current, generated_commit_highlight) then
+    vim.api.nvim_set_hl(0, "FzfPackCommit", commit_highlight())
+    generated_commit_highlight = vim.api.nvim_get_hl(0, { name = "FzfPackCommit", link = true })
+  end
+end
+
 local function initialize_highlights()
   for name, target in pairs(highlight_links) do
     vim.api.nvim_set_hl(0, name, { default = true, link = target })
+  end
+  if next(vim.api.nvim_get_hl(0, { name = "FzfPackCommit", link = true })) == nil then
+    local highlight = vim.tbl_extend("force", commit_highlight(), { default = true })
+    vim.api.nvim_set_hl(0, "FzfPackCommit", highlight)
+    generated_commit_highlight = vim.api.nvim_get_hl(0, { name = "FzfPackCommit", link = true })
   end
   if not highlight_autocmd then
     local group = vim.api.nvim_create_augroup("FzfPackStatusHighlights", { clear = true })
@@ -32,6 +62,7 @@ local function initialize_highlights()
             vim.api.nvim_set_hl(0, name, { link = target })
           end
         end
+        refresh_commit_highlight()
       end,
     })
     highlight_autocmd = true
@@ -72,11 +103,27 @@ function M.preview(row)
   if row.error then
     text[#text + 1] = row.error
   end
-  if row.log then
-    vim.list_extend(text, row.log)
+  local prefix = table.concat(text, "\n"):gsub("\r", "")
+  local log_text = row.log and #row.log > 0 and table.concat(row.log, "\n"):gsub("\r", "") or nil
+  if log_text then
+    text[#text + 1] = log_text
+  end
+  local highlights = {}
+  if log_text then
+    local log_row = select(2, prefix:gsub("\n", "")) + 1
+    for line in (log_text .. "\n"):gmatch("(.-)\n") do
+      if line:match("^commit %x+$") then
+        highlights[#highlights + 1] = {
+          row = log_row,
+          start_col = 0,
+          end_col = #line,
+        }
+      end
+      log_row = log_row + 1
+    end
   end
   vim.list_extend(text, { "", "Source: " .. p.spec.src, "Path: " .. p.path })
-  return vim.split(table.concat(text, "\n"):gsub("\r", ""), "\n")
+  return vim.split(table.concat(text, "\n"):gsub("\r", ""), "\n"), highlights
 end
 
 function M.open(rows, opts, checked)
@@ -84,6 +131,7 @@ function M.open(rows, opts, checked)
   assert(ok, "fzf-pack could not load fzf-lua: " .. tostring(fzf))
   assert(type(fzf.fzf_exec) == "function", "fzf-pack requires fzf-lua.fzf_exec")
   initialize_highlights()
+  commit_highlight_namespace = commit_highlight_namespace or vim.api.nvim_create_namespace("fzf-pack-commit-headers")
   local utils = require("fzf-lua.utils")
   local entries, by_id = {}, {}
   local preview_cache = {}
@@ -126,12 +174,20 @@ function M.open(rows, opts, checked)
   function Preview:populate_preview_buf(entry)
     local row = find(entry)
     local buf = self:get_tmp_buffer()
-    local lines = row and preview_cache[row]
-    if row and not lines then
-      lines = M.preview(row)
-      preview_cache[row] = lines
+    local formatted = row and preview_cache[row]
+    if row and not formatted then
+      local lines, highlights = M.preview(row)
+      formatted = { lines = lines, highlights = highlights }
+      preview_cache[row] = formatted
     end
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or {})
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, formatted and formatted.lines or {})
+    vim.api.nvim_buf_clear_namespace(buf, commit_highlight_namespace, 0, -1)
+    for _, span in ipairs(formatted and formatted.highlights or {}) do
+      vim.api.nvim_buf_set_extmark(buf, commit_highlight_namespace, span.row, span.start_col, {
+        end_col = span.end_col,
+        hl_group = "FzfPackCommit",
+      })
+    end
     self:set_preview_buf(buf)
     self.win:update_preview_scrollbar()
   end
