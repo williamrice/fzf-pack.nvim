@@ -57,6 +57,25 @@ green and update to red; rollback/diverged use the warning color and errors use
 red. These groups link to Neovim's diagnostic highlights, so themes control
 their colors. Reopen the picker after changing colorschemes to refresh colors.
 Override a status highlight with `vim.api.nvim_set_hl(0, "FzfPackUpdate", { fg = "#ff0000" })`.
+Commit headers in incoming and removed history use the bold `FzfPackCommit`
+highlight, which takes its foreground from `Identifier`. Conventional Commits
+breaking changes use a `[BREAKING CHANGE]` header warning and bold red
+`FzfPackBreakingChange` highlight for the header, subject, and footer explanation.
+Detection recognizes `type!: description`, `type(scope)!: description`, and
+`BREAKING CHANGE:` or `BREAKING-CHANGE:` footer markers, including indented
+continuation lines. Footer highlighting stops at the next valid trailer. For
+example, override either group with:
+
+```lua
+vim.api.nvim_set_hl(0, "FzfPackCommit", { fg = "#66ccff", bold = true })
+vim.api.nvim_set_hl(0, "FzfPackBreakingChange", { fg = "#ff3030", ctermfg = 9, bold = true })
+```
+
+Classification uses the captured commit subject and body only. The structured
+Git framing shares `max_log_bytes` with visible history, so it consumes a few
+bytes of that per-side limit. A footer cut off by the limit cannot be detected;
+the warning is informational and does not guarantee that omitted text contains
+no breaking change.
 
 `:PackUpdate` reports completed and total plugin checks. `:PackCancel` stops
 queued work, signals active Git processes, and prevents canceled results from

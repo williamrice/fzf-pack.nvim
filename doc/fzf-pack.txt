@@ -68,6 +68,22 @@ uncolored. For example, set a custom update color with:
 
     :lua vim.api.nvim_set_hl(0, "FzfPackUpdate", { fg = "#ff0000" })
 
+Commit headers in incoming and removed history use the bold FzfPackCommit
+highlight, whose default foreground follows Identifier. Conventional Commits
+breaking changes display a [BREAKING CHANGE] warning and use bold red
+FzfPackBreakingChange for the header, subject and footer explanation. Detection
+recognizes type!: description, type(scope)!: description, and BREAKING CHANGE:
+or BREAKING-CHANGE: footers, including indented continuation lines. Footer
+highlighting stops at the next valid trailer. Override either group with:
+
+    :lua vim.api.nvim_set_hl(0, "FzfPackCommit", { fg = "#66ccff", bold = true })
+    :lua vim.api.nvim_set_hl(0, "FzfPackBreakingChange", { fg = "#ff3030", ctermfg = 9, bold = true })
+
+Classification uses the captured subject and body. Structured Git framing shares
+max_log_bytes with visible history and consumes a few bytes of that limit. A
+footer beyond the limit cannot be detected; the warning is informational and
+does not guarantee that omitted text contains no breaking change.
+
 Picker keys for :PackUpdate:
     Tab / Shift-Tab    Select multiple results (standard fzf bindings).
     Enter              Review selected available changes.

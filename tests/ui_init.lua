@@ -6,6 +6,7 @@ vim.opt.termguicolors = true
 vim.api.nvim_set_hl(0, "DiagnosticOk", { fg = "#11aa22" })
 vim.api.nvim_set_hl(0, "DiagnosticError", { fg = "#dd2233" })
 vim.api.nvim_set_hl(0, "DiagnosticWarn", { fg = "#eeaa00" })
+vim.api.nvim_set_hl(0, "Identifier", { fg = "#2468ac", ctermfg = 25 })
 local test_tmp = assert(vim.env.FZF_PACK_TEST_TMP)
 local path = test_tmp .. "/upstream"
 local source = "file://" .. path
@@ -33,12 +34,27 @@ vim.fn.writefile({ "new" }, path .. "/content")
 git("add", ".")
 local message_path = test_tmp .. "/commit-message"
 vim.fn.writefile(
-  vim.split("UI incoming subject\n\nUI incoming body\n" .. string.rep("UI payload界\n", 80), "\n"),
+  vim.list_extend(
+    { "chore(ui): UI normal subject", "", "UI normal body" },
+    vim.split(string.rep("UI payload界\n", 80), "\n")
+  ),
   message_path
 )
 git("commit", "-q", "-F", message_path)
+vim.fn.writefile({ "new breaking" }, path .. "/content")
+git("add", ".")
+vim.fn.writefile({
+  "feat(ui)!: UI incoming subject",
+  "",
+  "UI incoming body",
+  "",
+  "BREAKING CHANGE: UI API changes",
+  "  Migrate callers",
+}, message_path)
+git("commit", "-q", "-F", message_path)
+vim.g.ui_new = git("rev-parse", "HEAD")
 vim.g.ui_lock_before = require("fzf-pack.pack").lock_bytes()
-require("fzf-pack").setup({ max_log_bytes = 128 })
+require("fzf-pack").setup({ max_log_bytes = 300 })
 -- Give only the browser action synthetic web sources. Update review must keep
 -- using the original local Git sources and snapshots.
 local browser_calls = {}
@@ -127,10 +143,13 @@ timer:start(
       attributes = attributes,
       browser_calls = browser_calls,
       browser_notices = browser_notices,
+      commit_highlight = vim.api.nvim_get_hl(0, { name = "FzfPackCommit" }),
+      breaking_highlight = vim.api.nvim_get_hl(0, { name = "FzfPackBreakingChange" }),
       lines = vim.api.nvim_buf_get_lines(0, 0, -1, false),
       unchanged = require("fzf-pack.pack").lock_bytes() == vim.g.ui_lock_before,
       confirmed = require("fzf-pack.pack").confirm_open(),
       old = vim.g.ui_old,
+      new = vim.g.ui_new,
     }
     local state_path = vim.env.FZF_PACK_TEST_TMP .. "/ui-state.json"
     vim.fn.writefile({ vim.json.encode(state) }, state_path .. ".tmp")
