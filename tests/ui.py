@@ -45,6 +45,7 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
                             stdin=slave, stdout=slave, stderr=slave, env=env)
     os.close(slave)
     transcript = bytearray()
+    query_buffer = bytearray()
     state_path = Path(tmp) / "ui-state.json"
 
     def drain():
@@ -56,6 +57,16 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
                 if not data:
                     break
                 transcript.extend(data)
+                # Neovim waits for a primary device-attributes (DA1) reply
+                # when stopping its TUI. Act as a VT100-compatible terminal,
+                # including when a request is split across PTY reads.
+                query_buffer.extend(data)
+                consumed = 0
+                for query in re.finditer(rb"\x1b\[(?:0)?c", query_buffer):
+                    os.write(master, b"\x1b[?1;2c")
+                    consumed = query.end()
+                del query_buffer[:consumed]
+                del query_buffer[:-3]
             except OSError:
                 break
 
