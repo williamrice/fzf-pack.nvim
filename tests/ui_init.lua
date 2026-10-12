@@ -2,7 +2,8 @@ vim.opt.runtimepath:prepend(assert(vim.env.FZF_PACK_TEST_ROOT))
 vim.opt.runtimepath:prepend(assert(vim.env.FZF_LUA_PATH))
 vim.opt.packpath:prepend(vim.fn.stdpath("data") .. "/site")
 vim.opt.swapfile = false
-local path = assert(vim.env.FZF_PACK_TEST_TMP) .. "/upstream"
+local test_tmp = assert(vim.env.FZF_PACK_TEST_TMP)
+local path = test_tmp .. "/upstream"
 local source = "file://" .. path
 vim.fn.mkdir(path, "p")
 local function git(...)
@@ -26,9 +27,14 @@ vim.pack.add({
 }, { confirm = false, load = false })
 vim.fn.writefile({ "new" }, path .. "/content")
 git("add", ".")
-git("commit", "-qm", "UI incoming subject", "-m", "UI incoming body")
+local message_path = test_tmp .. "/commit-message"
+vim.fn.writefile(
+  vim.split("UI incoming subject\n\nUI incoming body\n" .. string.rep("UI payload界\n", 80), "\n"),
+  message_path
+)
+git("commit", "-q", "-F", message_path)
 vim.g.ui_lock_before = require("fzf-pack.pack").lock_bytes()
-require("fzf-pack").setup()
+require("fzf-pack").setup({ max_log_bytes = 128 })
 vim.g.ui_ready = true
 local timer = vim.uv.new_timer()
 timer:start(

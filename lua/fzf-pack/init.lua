@@ -1,5 +1,5 @@
 local M = {}
-M.options = { concurrency = 4, timeout = 30000, max_commits = 200 }
+M.options = { concurrency = 4, timeout = 30000, max_commits = 200, max_log_bytes = 65536 }
 
 function M.setup(opts)
   opts = opts or {}

@@ -19,9 +19,16 @@ before using the commands.
     concurrency = 4,       -- maximum simultaneous plugin checks
     timeout = 30000,       -- milliseconds per Git process
     max_commits = 200,     -- commits previewed per side of history
+    max_log_bytes = 65536, -- history bytes per plugin and side
   })
 <
 Options must be positive integers. There is no startup fetching or syncing.
+Each incoming and removed history is captured up to max_log_bytes, independently
+of max_commits. The cap counts raw Git output bytes; section labels and visible
+truncation notices are not counted. History status is classified separately,
+so truncation does not change update, rollback, or diverged status.
+History is collected during checks; each row's formatted preview is cached on
+first display.
 
 ==============================================================================
 COMMANDS                                               *fzf-pack-commands*
@@ -45,7 +52,8 @@ Rows form three aligned columns: name, active/inactive state, and status.
 Moving through rows updates the details pane, on the right in wide windows
 and below in narrow ones. It includes the branch/tag/commit or semver constraint,
 installed/target hashes, lock revision, source and path, plus incoming
-and removed commit subjects and bodies. Each side is capped by max_commits.
+and removed commit subjects and bodies. Each side is capped by max_commits and
+max_log_bytes; oversized history shows a truncation notice.
 Status: current, cached (local only), update, rollback, diverged, or error.
 
 Picker keys for :PackUpdate:
