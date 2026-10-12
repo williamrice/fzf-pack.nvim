@@ -31,6 +31,18 @@ local function commit_highlight()
   return highlight
 end
 
+local function initialize_breaking_highlight()
+  local current = vim.api.nvim_get_hl(0, { name = "FzfPackBreakingChange", link = true })
+  if next(current) == nil then
+    vim.api.nvim_set_hl(0, "FzfPackBreakingChange", {
+      fg = "#ff0000",
+      ctermfg = 9,
+      bold = true,
+      default = true,
+    })
+  end
+end
+
 local function refresh_commit_highlight()
   if not generated_commit_highlight then
     return
@@ -63,6 +75,7 @@ local function initialize_highlights()
           end
         end
         refresh_commit_highlight()
+        initialize_breaking_highlight()
       end,
     })
     highlight_autocmd = true
@@ -108,22 +121,59 @@ function M.preview(row)
   if log_text then
     text[#text + 1] = log_text
   end
+  vim.list_extend(text, { "", "Source: " .. p.spec.src, "Path: " .. p.path })
+  local lines = vim.split(table.concat(text, "\n"):gsub("\r", ""), "\n")
   local highlights = {}
   if log_text then
     local log_row = select(2, prefix:gsub("\n", "")) + 1
-    for line in (log_text .. "\n"):gmatch("(.-)\n") do
-      if line:match("^commit %x+$") then
+    for index, entry in ipairs(row.log) do
+      for _, record in ipairs(row.log.records and row.log.records[index] or {}) do
+        local group = record.breaking and "FzfPackBreakingChange" or "FzfPackCommit"
+        local header_row = log_row + record.header_line
         highlights[#highlights + 1] = {
-          row = log_row,
+          row = header_row,
           start_col = 0,
-          end_col = #line,
+          end_col = record.header_end_col,
+          end_row = header_row,
+          group = group,
+          role = "header",
+          subject = record.subject,
+          section = index,
+          warning = record.breaking and " [BREAKING CHANGE]" or nil,
         }
+        if record.breaking and record.subject_complete and record.subject_end_col > 0 then
+          local subject_row = log_row + record.subject_line
+          highlights[#highlights + 1] = {
+            row = subject_row,
+            start_col = 0,
+            end_col = record.subject_end_col,
+            end_row = subject_row,
+            group = group,
+            role = "subject",
+            subject = record.subject,
+            section = index,
+          }
+          for _, footer in ipairs(record.footer_lines) do
+            local start_row = log_row + footer.start_line
+            local end_row = log_row + footer.end_line
+            highlights[#highlights + 1] = {
+              row = start_row,
+              start_col = 0,
+              end_row = end_row,
+              end_col = #(lines[end_row + 1] or ""),
+              group = "FzfPackBreakingChange",
+              role = "footer",
+              subject = record.subject,
+              section = index,
+            }
+          end
+        end
       end
-      log_row = log_row + 1
+      local _, line_count = (entry:gsub("\r", "")):gsub("\n", "")
+      log_row = log_row + line_count + 1
     end
   end
-  vim.list_extend(text, { "", "Source: " .. p.spec.src, "Path: " .. p.path })
-  return vim.split(table.concat(text, "\n"):gsub("\r", ""), "\n"), highlights
+  return lines, highlights
 end
 
 function M.open(rows, opts, checked)
@@ -131,6 +181,7 @@ function M.open(rows, opts, checked)
   assert(ok, "fzf-pack could not load fzf-lua: " .. tostring(fzf))
   assert(type(fzf.fzf_exec) == "function", "fzf-pack requires fzf-lua.fzf_exec")
   initialize_highlights()
+  initialize_breaking_highlight()
   commit_highlight_namespace = commit_highlight_namespace or vim.api.nvim_create_namespace("fzf-pack-commit-headers")
   local utils = require("fzf-lua.utils")
   local entries, by_id = {}, {}
@@ -184,8 +235,11 @@ function M.open(rows, opts, checked)
     vim.api.nvim_buf_clear_namespace(buf, commit_highlight_namespace, 0, -1)
     for _, span in ipairs(formatted and formatted.highlights or {}) do
       vim.api.nvim_buf_set_extmark(buf, commit_highlight_namespace, span.row, span.start_col, {
+        end_row = span.end_row,
         end_col = span.end_col,
-        hl_group = "FzfPackCommit",
+        hl_group = span.group,
+        virt_text = span.warning and { { span.warning, "FzfPackBreakingChange" } } or nil,
+        virt_text_pos = span.warning and "eol" or nil,
       })
     end
     self:set_preview_buf(buf)

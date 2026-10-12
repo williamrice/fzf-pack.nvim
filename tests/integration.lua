@@ -136,6 +136,105 @@ local function run()
     end
     return result, map
   end
+  local breaking_upstream = repo("breaking-upstream")
+  local breaking_base = commit(breaking_upstream, "breaking base")
+  local breaking_installed = tmp .. "/breaking-installed"
+  local clone = vim.system({ "git", "clone", "-q", breaking_upstream, breaking_installed }, { text = true }):wait()
+  assert(clone.code == 0, clone.stderr)
+  git(breaking_installed, "config", "user.name", "Fixture")
+  git(breaking_installed, "config", "user.email", "fixture@example.invalid")
+  commit(breaking_upstream, "feat()!: empty scopes do not match")
+  commit(breaking_upstream, "refactor!: unscoped arbitrary type", "API behavior changes.")
+  commit(breaking_upstream, "docs(api)!: scoped arbitrary type", "The old API is removed.")
+  commit(
+    breaking_upstream,
+    "chore: footer space marker",
+    "ordinary message text\n\nReviewed-by: Fixture <x>\nBREAKING CHANGE: the format changed\n  continuation line one\n  continuation line two\nRefs #123\nBREAKING CHANGE: second breaking footer\n  final explanation"
+  )
+  commit(
+    breaking_upstream,
+    "build: footer hyphen alias",
+    "BREAKING-CHANGE: the build behavior changed\n  second explanation line"
+  )
+  commit(
+    breaking_upstream,
+    "docs: prose punctuation is not a marker",
+    "Prose says ! in passing.\ncommit deadbeef\nThis sentence mentions BREAKING CHANGE: without being a footer.\nBREAKING CHANGE #123 is not a marker."
+  )
+  commit(breaking_installed, "fix!: removed-side breaking", "BREAKING CHANGE: removed API\n  old callers must migrate")
+  local breaking_plugin = {
+    spec = { name = "breaking fixture", src = breaking_upstream, version = "main" },
+    path = breaking_installed,
+    locked_src = breaking_upstream,
+    rev = breaking_base,
+    active = false,
+  }
+  local _, breaking_rows = collect(true, { breaking_plugin }, opts)
+  local breaking_row = breaking_rows["breaking fixture"]
+  expect(breaking_row.status == "diverged", "breaking fixture has incoming and removed history")
+  expect(type(breaking_row.log.records) == "table", "bounded Git history returns structured commit metadata")
+  local picker = require("fzf-pack.picker")
+  local breaking_lines, breaking_spans = picker.preview(breaking_row)
+  local function find_record(section, subject)
+    for _, record in ipairs(breaking_row.log.records[section] or {}) do
+      if record.subject == subject then
+        return record
+      end
+    end
+  end
+  expect(find_record(2, "refactor!: unscoped arbitrary type").breaking, "unscoped bang marks arbitrary commit type")
+  expect(find_record(2, "docs(api)!: scoped arbitrary type").breaking, "scoped bang marks arbitrary commit type")
+  expect(find_record(2, "chore: footer space marker").breaking, "BREAKING CHANGE footer marks commit")
+  expect(find_record(2, "build: footer hyphen alias").breaking, "BREAKING-CHANGE alias marks commit")
+  expect(
+    not find_record(2, "feat()!: empty scopes do not match").breaking,
+    "empty Conventional Commit scope does not match"
+  )
+  expect(
+    not find_record(2, "docs: prose punctuation is not a marker").breaking,
+    "ordinary exclamation and prose mentions are not markers"
+  )
+  expect(find_record(5, "fix!: removed-side breaking").breaking, "removed-side bang is classified")
+  local function has_span(subject, role, line_fragment)
+    for _, span in ipairs(breaking_spans) do
+      if span.subject == subject and span.role == role then
+        for row = span.row, span.end_row do
+          if breaking_lines[row + 1]:find(line_fragment, 1, true) then
+            return true
+          end
+        end
+      end
+    end
+    return false
+  end
+  expect(
+    has_span("refactor!: unscoped arbitrary type", "subject", "refactor!:"),
+    "breaking subject span reaches picker preview"
+  )
+  expect(
+    has_span("chore: footer space marker", "footer", "continuation line two"),
+    "multiline breaking footer continuation reaches picker preview"
+  )
+  expect(
+    has_span("chore: footer space marker", "footer", "second breaking footer"),
+    "multiple breaking footers are highlighted"
+  )
+  for _, span in ipairs(breaking_spans) do
+    if span.subject == "chore: footer space marker" and span.role == "footer" then
+      expect(
+        not breaking_lines[span.end_row + 1]:find("Refs #123", 1, true),
+        "breaking footer stops at the next valid hash reference trailer"
+      )
+    end
+  end
+  expect(
+    has_span("fix!: removed-side breaking", "footer", "old callers must migrate"),
+    "removed footer explanation reaches picker preview"
+  )
+  expect(
+    not has_span("docs: prose punctuation is not a marker", "header", "deadbeef"),
+    "body lines resembling commit headers are not highlighted"
+  )
   local _, unmatched_rows = collect(false, { unmatched })
   local unmatched_row = unmatched_rows[unmatched.spec.name]
   expect(
@@ -236,22 +335,14 @@ local function run()
     "commit a1b2c3d4e5\n[history truncated at 1 bytes]",
   }
   local synthetic_lines, synthetic_spans = require("fzf-pack.picker").preview(synthetic)
-  expect(#synthetic_spans == 4, "incoming and removed commit headers are recognized")
-  for _, span in ipairs(synthetic_spans) do
-    expect(synthetic_lines[span.row + 1]:match("^commit %x+$"), "only complete log header lines are highlighted")
-    expect(span.start_col == 0 and span.end_col == #synthetic_lines[span.row + 1], "header spans use byte columns")
-  end
+  expect(#synthetic_spans == 0, "plain metadata-looking prose is not treated as structured commits")
   local unicode_body, body_header = false, false
   for _, line in ipairs(synthetic_lines) do
     unicode_body = unicode_body or line == "body with 界 and ordinary text"
     body_header = body_header or line == "commit cafe123"
   end
   expect(unicode_body, "Unicode commit bodies stay intact")
-  expect(
-    body_header and synthetic_lines[synthetic_spans[3].row + 1] == "commit cafe123",
-    "a body line matching the header pattern receives cosmetic highlighting"
-  )
-  expect(synthetic_spans[1].end_col == #"commit 0123456789abcdef", "non-seven-character hashes are supported")
+  expect(body_header, "body text resembling a commit record remains plain text")
   expect(
     table.concat(synthetic_lines, "\n"):find("body with 界 and ordinary text", 1, true) ~= nil,
     "multibyte body remains in preview"
@@ -285,7 +376,7 @@ local function run()
       "--topo-order",
       "--right-only",
       "--max-count=" .. opts.max_commits,
-      "--format=commit %h%n%s%n%b",
+      "--format=commit %h%x00%s%x00%b%x00",
       rows.branch.head .. "..." .. rows.branch.target,
       "--",
     }, { text = true })
@@ -310,8 +401,27 @@ local function run()
   end
   local exact_log = read_changelog(vim.tbl_extend("force", opts, { max_log_bytes = #raw_incoming.stdout }))
   expect(not table.concat(exact_log, "\n"):find("truncated", 1, true), "exact byte budget is not marked truncated")
+  expect(not table.concat(exact_log, "\n"):find("\0", 1, true), "framing bytes never reach preview text")
   local short_log = read_changelog(vim.tbl_extend("force", opts, { max_log_bytes = #raw_incoming.stdout - 1 }))
   expect(table.concat(short_log, "\n"):find("truncated", 1, true), "one byte below output size is truncated")
+  local nul_positions, search_at = {}, 1
+  while #nul_positions < 3 do
+    local position = raw_incoming.stdout:find("\0", search_at, true)
+    if not position then
+      break
+    end
+    nul_positions[#nul_positions + 1] = position
+    search_at = position + 1
+  end
+  expect(#nul_positions == 3, "framed Git output contains hash, subject, and body boundaries")
+  for _, position in ipairs(nul_positions) do
+    for _, cap in ipairs({ position - 1, position, position + 1 }) do
+      local around = read_changelog(vim.tbl_extend("force", opts, { max_log_bytes = cap }))
+      local visible = table.concat(around, "\n")
+      expect(not visible:find("\0", 1, true), "partial NUL framing is stripped at byte cap " .. cap)
+      expect(not visible:find("FZFPACK", 1, true), "internal framing never reaches preview text")
+    end
+  end
   local multibyte_at = assert(raw_incoming.stdout:find("界", 1, true))
   local boundary_log = read_changelog(vim.tbl_extend("force", opts, { max_log_bytes = multibyte_at }))
   expect(valid_utf8(boundary_log[2]), "byte cap preserves a complete UTF-8 boundary")
@@ -450,8 +560,19 @@ local function run()
     vim.api.nvim_get_hl(0, { name = "FzfPackCommit" }).fg == 0x13579b,
     "generated commit highlight follows colorscheme changes"
   )
+  local generated_breaking = vim.api.nvim_get_hl(0, { name = "FzfPackBreakingChange" })
+  expect(
+    generated_breaking.bold and generated_breaking.fg == 0xff0000 and generated_breaking.ctermfg == 9,
+    "default breaking highlight is bold red in GUI and terminal colors"
+  )
+  expect(
+    generated_breaking.bg == nil and generated_breaking.ctermbg == nil,
+    "default breaking highlight has no background"
+  )
   vim.api.nvim_set_hl(0, "FzfPackTestCommitOverride", { fg = "#abcdef", bold = false })
   vim.api.nvim_set_hl(0, "FzfPackCommit", { link = "FzfPackTestCommitOverride" })
+  vim.api.nvim_set_hl(0, "FzfPackTestBreakingOverride", { fg = "#123abc", bold = false })
+  vim.api.nvim_set_hl(0, "FzfPackBreakingChange", { link = "FzfPackTestBreakingOverride" })
   vim.api.nvim_set_hl(0, "FzfPackCurrent", { fg = "#123456" })
   picker.open(result, opts, true)
   expect(captured[2].fzf_opts["--multi"], "multi selection enabled")
@@ -460,6 +581,10 @@ local function run()
   expect(
     vim.api.nvim_get_hl(0, { name = "FzfPackCommit", link = true }).link == "FzfPackTestCommitOverride",
     "custom linked commit highlight is preserved"
+  )
+  expect(
+    vim.api.nvim_get_hl(0, { name = "FzfPackBreakingChange", link = true }).link == "FzfPackTestBreakingOverride",
+    "custom linked breaking highlight is preserved"
   )
   local highlighted_statuses = {}
   for _, entry in ipairs(captured[1]) do
@@ -497,6 +622,10 @@ local function run()
   expect(
     vim.api.nvim_get_hl(0, { name = "FzfPackCommit", link = true }).link == "FzfPackTestCommitOverride",
     "custom linked commit highlight survives colorscheme changes"
+  )
+  expect(
+    vim.api.nvim_get_hl(0, { name = "FzfPackBreakingChange", link = true }).link == "FzfPackTestBreakingOverride",
+    "custom linked breaking highlight survives colorscheme changes"
   )
   local original = pack.review
   local selected

@@ -34,13 +34,27 @@ vim.fn.writefile({ "new" }, path .. "/content")
 git("add", ".")
 local message_path = test_tmp .. "/commit-message"
 vim.fn.writefile(
-  vim.split("UI incoming subject\n\nUI incoming body\n" .. string.rep("UI payload界\n", 80), "\n"),
+  vim.list_extend(
+    { "chore(ui): UI normal subject", "", "UI normal body" },
+    vim.split(string.rep("UI payload界\n", 80), "\n")
+  ),
   message_path
 )
 git("commit", "-q", "-F", message_path)
+vim.fn.writefile({ "new breaking" }, path .. "/content")
+git("add", ".")
+vim.fn.writefile({
+  "feat(ui)!: UI incoming subject",
+  "",
+  "UI incoming body",
+  "",
+  "BREAKING CHANGE: UI API changes",
+  "  Migrate callers",
+}, message_path)
+git("commit", "-q", "-F", message_path)
 vim.g.ui_new = git("rev-parse", "HEAD")
 vim.g.ui_lock_before = require("fzf-pack.pack").lock_bytes()
-require("fzf-pack").setup({ max_log_bytes = 128 })
+require("fzf-pack").setup({ max_log_bytes = 300 })
 vim.g.ui_ready = true
 local timer = vim.uv.new_timer()
 local stopped = false
@@ -92,6 +106,7 @@ timer:start(
       screen = screen,
       attributes = attributes,
       commit_highlight = vim.api.nvim_get_hl(0, { name = "FzfPackCommit" }),
+      breaking_highlight = vim.api.nvim_get_hl(0, { name = "FzfPackBreakingChange" }),
       lines = vim.api.nvim_buf_get_lines(0, 0, -1, false),
       unchanged = require("fzf-pack.pack").lock_bytes() == vim.g.ui_lock_before,
       confirmed = require("fzf-pack.pack").confirm_open(),
