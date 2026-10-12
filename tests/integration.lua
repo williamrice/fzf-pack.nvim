@@ -294,6 +294,35 @@ local function run()
     :wait(30000)
   expect(child.code == 0, "repeat startup: " .. (child.stderr or ""))
   expect(pack.lock_bytes() == after, "repeat startup preserves lock")
+
+  -- An external revision change to an unselected plugin must invalidate a
+  -- fresh check and a newly checked selected update in this session.
+  local _, current_rows = collect(false)
+  expect(current_rows.topic.status == "update", "unselected topic remains available to update")
+  local external_lock = vim.json.decode(after)
+  external_lock.plugins.pinned.rev = newer
+  local external_bytes = vim.json.encode(external_lock)
+  local lock_path = vim.fs.joinpath(vim.fn.stdpath("config"), "nvim-pack-lock.json")
+  local lock_file = assert(io.open(lock_path, "wb"))
+  lock_file:write(external_bytes)
+  lock_file:close()
+  local branch_head = git(paths.branch, "rev-parse", "HEAD")
+  local topic_head = git(paths.topic, "rev-parse", "HEAD")
+  local fresh_ok = pcall(function()
+    collect(false)
+  end)
+  expect(not fresh_ok, "fresh check refuses externally changed cached revision")
+  local review_ok, review_error = pcall(pack.review, { current_rows.topic })
+  expect(
+    not review_ok and tostring(review_error):find("cached lock revisions differ", 1, true),
+    "selected update refuses because an unselected cached revision differs"
+  )
+  expect(not pack.confirm_open(), "refusal does not open native confirmation")
+  expect(pack.lock_bytes() == external_bytes, "external lock bytes preserved after refusal")
+  expect(
+    git(paths.branch, "rev-parse", "HEAD") == branch_head and git(paths.topic, "rev-parse", "HEAD") == topic_head,
+    "refusal preserves selected and unselected installed revisions"
+  )
   print(("PASS: %d assertions on Neovim %s"):format(total, tostring(vim.version())))
 end
 local ok, err = xpcall(run, debug.traceback)
