@@ -39,6 +39,42 @@ vim.fn.writefile(
 git("commit", "-q", "-F", message_path)
 vim.g.ui_lock_before = require("fzf-pack.pack").lock_bytes()
 require("fzf-pack").setup({ max_log_bytes = 128 })
+-- Give only the browser action synthetic web sources. Update review must keep
+-- using the original local Git sources and snapshots.
+local browser_calls = {}
+local browser_notices = {}
+local original_notify = vim.notify
+vim.notify = function(message, level, options)
+  if message:find("fzf-pack: Could not open repository:", 1, true) then
+    browser_notices[#browser_notices + 1] = message
+    return
+  end
+  return original_notify(message, level, options)
+end
+vim.ui.open = function(url)
+  browser_calls[#browser_calls + 1] = url
+  if vim.fn.filereadable(test_tmp .. "/browser-fails") == 1 then
+    return nil, "fixture has no browser opener"
+  end
+  return {}
+end
+local check = require("fzf-pack.check")
+local original_review = check.review
+check.review = function(chosen, ...)
+  for _, row in ipairs(chosen) do
+    row.plugin.spec.src = source
+  end
+  return original_review(chosen, ...)
+end
+local picker = require("fzf-pack.picker")
+local open_picker = picker.open
+picker.open = function(rows, options, checked)
+  local browser_rows = vim.deepcopy(rows)
+  for _, row in ipairs(browser_rows) do
+    row.plugin.spec.src = "https://github.com/fixture/" .. row.plugin.spec.name .. ".git"
+  end
+  return open_picker(browser_rows, options, checked)
+end
 vim.g.ui_ready = true
 local timer = vim.uv.new_timer()
 local stopped = false
@@ -89,6 +125,8 @@ timer:start(
       filetype = vim.bo.filetype,
       screen = screen,
       attributes = attributes,
+      browser_calls = browser_calls,
+      browser_notices = browser_notices,
       lines = vim.api.nvim_buf_get_lines(0, 0, -1, false),
       unchanged = require("fzf-pack.pack").lock_bytes() == vim.g.ui_lock_before,
       confirmed = require("fzf-pack.pack").confirm_open(),

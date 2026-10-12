@@ -52,6 +52,64 @@ local function repo(name)
   return path
 end
 local function run()
+  local repository = require("fzf-pack.repository")
+  for _, case in ipairs({
+    { "https://github.com/owner/repo.git/", "https://github.com/owner/repo" },
+    { "HTTPS://github.com/owner/repo", "https://github.com/owner/repo" },
+    { "https://[::1]:8080/group/repo.git", "https://[::1]:8080/group/repo" },
+    { "http://git.example.org:8080/group/repo.git", "http://git.example.org:8080/group/repo" },
+    {
+      "https://gitlab.com/group/sub/repo%20name.git?view=1#readme",
+      "https://gitlab.com/group/sub/repo%20name?view=1#readme",
+    },
+    { "git@github.com:owner/repo.git", "https://github.com/owner/repo" },
+    { "ssh://git@gitlab.com/group/sub/repo.git", "https://gitlab.com/group/sub/repo" },
+    { "git@codeberg.org:owner/repo.git", "https://codeberg.org/owner/repo" },
+  }) do
+    expect(repository.url(case[1]) == case[2], "normalize browser repository URL: " .. case[1])
+  end
+  for _, source in ipairs({
+    "",
+    "/tmp/repo",
+    "./repo",
+    "file:///tmp/repo",
+    "ftp://host/repo",
+    "https://user:secret@github.com/owner/repo",
+    "git@alias:owner/repo.git",
+    "ssh://git@github.com:2222/owner/repo",
+    "https:///repo",
+    "https://host/",
+    "https://host/repo\n",
+    "https://host/repo%0a",
+    "https://host/repo%xx",
+    "https://host\\@evil/repo",
+  }) do
+    expect(repository.url(source) == nil, "unsupported browser source is rejected")
+  end
+  local ui_open, notify = vim.ui.open, vim.notify
+  local opened, notices = {}, {}
+  vim.ui.open = function(url)
+    opened[#opened + 1] = url
+    return {}
+  end
+  vim.notify = function(message)
+    notices[#notices + 1] = message
+  end
+  repository.open("git@github.com:owner/repo.git")
+  expect(#opened == 1 and opened[1] == "https://github.com/owner/repo", "open one normalized URL")
+  repository.open("file:///tmp/repo")
+  expect(#opened == 1 and #notices == 1, "unsupported source notifies without opening")
+  vim.ui.open = function()
+    return nil, "No opener available"
+  end
+  repository.open("https://github.com/owner/repo")
+  expect(notices[#notices]:find("No opener available", 1, true), "missing opener is reported")
+  vim.ui.open = function()
+    error("launch failed")
+  end
+  repository.open("https://github.com/owner/repo")
+  expect(notices[#notices]:find("launch failed", 1, true), "thrown opener failure is reported")
+  vim.ui.open, vim.notify = ui_open, notify
   local upstream = repo("upstream")
   local old = commit(upstream, "initial")
   git(upstream, "tag", "-a", "v1.0.0", "-m", "annotated release")
@@ -446,6 +504,22 @@ local function run()
       end
     end
   end
+  local open_source = repository.open
+  local sources = {}
+  repository.open = function(source)
+    sources[#sources + 1] = source
+  end
+  local browser_action = captured[2].actions["ctrl-o"]
+  expect(
+    browser_action.exec_silent and browser_action.field_index == "{}",
+    "browser action uses focused row and keeps picker open"
+  )
+  browser_action.fn(nil)
+  browser_action.fn({})
+  browser_action.fn({ "not a row" })
+  browser_action.fn({ entry_map.branch })
+  expect(#sources == 1 and sources[1] == alias, "browser action resolves exact source through stable row identity")
+  repository.open = open_source
   captured[2].actions.enter({ entry_map.branch, entry_map.semver, entry_map.pinned })
   expect(
     vim.wait(10000, function()
@@ -466,6 +540,7 @@ local function run()
   pack.review = original
 
   picker.open(local_result, opts, false)
+  expect(captured[2].actions["ctrl-o"].exec_silent, "local picker exposes browser shortcut")
   local found_cached = false
   for _, entry in ipairs(captured[1]) do
     if entry:match("cached$") then

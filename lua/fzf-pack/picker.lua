@@ -109,6 +109,9 @@ function M.open(rows, opts, checked)
     by_id[i] = row
   end
   local function find(entry)
+    if type(entry) ~= "string" then
+      return nil
+    end
     return by_id[tonumber(entry:match("^(%d+)"))]
   end
   local Preview = require("fzf-lua.previewer.builtin").base:extend()
@@ -168,9 +171,21 @@ function M.open(rows, opts, checked)
         end,
       }
     or { ["enter"] = function() end }
+  actions["ctrl-o"] = {
+    fn = function(selected)
+      local row = find(selected and selected[1])
+      if row then
+        require("fzf-pack.repository").open(row.plugin.spec.src)
+      end
+    end,
+    exec_silent = true,
+    field_index = "{}",
+    desc = "Open repository",
+  }
   return fzf.fzf_exec(entries, {
     prompt = checked and "PackUpdate> " or "Pack> ",
     header = (checked and "Tab: select · Enter: review · Ctrl-A: all" or "Local refs · :PackUpdate to fetch")
+      .. " · Ctrl-O: open repo"
       .. "\n\n"
       .. cell("PLUGIN", name_width)
       .. "  "

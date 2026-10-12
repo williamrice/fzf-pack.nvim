@@ -107,6 +107,15 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         send(b":Pack\r")
         local = wait(lambda s: terminal(s) and "cached" in "\n".join(s.get("screen", [])))
         assert "alpha" in "\n".join(local["screen"])
+        send(b"beta")
+        wait(lambda s: terminal(s) and "Pack> beta" in "\n".join(s.get("screen", []))
+             and "beta (active)" in "\n".join(s.get("screen", [])))
+        send(b"\x0f")
+        opened = wait(lambda s: terminal(s) and s.get("browser_calls") == ["https://github.com/fixture/beta"])
+        assert "Pack> beta" in "\n".join(opened["screen"]) and opened["unchanged"]
+        send(b"\x15no-such-plugin")
+        wait(lambda s: terminal(s) and "0/3" in "\n".join(s.get("screen", [])))
+        send(b"\x0f")
         capture("local-picker")
         send(b"\x1b")
         assert wait(closed)["unchanged"]
@@ -141,6 +150,18 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert update_attribute != alpha_name_attribute
         beta_name_attribute, update_attribute = row_attributes(marked, "beta", "update")
         assert update_attribute != beta_name_attribute
+        send(b"\x0f")
+        opened = wait(lambda s: terminal(s) and s.get("browser_calls") == [
+            "https://github.com/fixture/beta", "https://github.com/fixture/beta"])
+        assert "3/3 (1)" in "\n".join(opened["screen"]) and opened["unchanged"]
+        failure_flag = Path(tmp) / "browser-fails"
+        failure_flag.touch()
+        send(b"\x0f")
+        failed_open = wait(lambda s: terminal(s) and len(s.get("browser_calls", [])) == 3
+                           and bool(s.get("browser_notices")))
+        assert "fixture has no browser opener" in failed_open["browser_notices"][-1]
+        assert "3/3 (1)" in "\n".join(failed_open["screen"]) and failed_open["unchanged"]
+        failure_flag.unlink()
         send(b"\t\r")
         reviewed = wait(native)
         text = "\n".join(reviewed["lines"])

@@ -70,7 +70,15 @@ In the update picker:
 | Tab / Shift-Tab | Select multiple plugins |
 | Enter | Review selected available changes |
 | Ctrl-A | Review all available changes, including filtered-out results |
+| Ctrl-O | Open the focused plugin's repository in your default browser |
 | Esc | Close without applying changes |
+
+Ctrl-O also works in `:Pack`. It opens only the focused row, keeping the picker,
+query, and marked selections intact. HTTP(S) repository URLs retain their web
+host and port; `.git` suffixes are removed. Common `git@host:path` and
+`ssh://git@host/path` sources on GitHub, GitLab, and Codeberg convert to HTTPS.
+Local paths, credentials in URLs, unresolved Git/SSH aliases, custom SSH ports,
+and other schemes show a notice instead. No fetch or update is performed.
 
 Selected changes open **vim.pack's native confirmation buffer**. Run `:write`
 to accept or `:quit` to cancel. Restart Neovim after updating to use the new code.
