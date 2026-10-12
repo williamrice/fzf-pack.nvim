@@ -39,7 +39,7 @@ a dependency. fzf-pack.nvim manages plugins registered with `vim.pack`.
 2. Move through the list to preview each plugin’s changes. Type to filter results.
 3. Press Tab to select plugins, then Enter to review them. Use Ctrl-A to review
    all available changes, including results hidden by your filter.
-4. In the confirmation buffer, run `:write` to apply the changes or `:quit` to cancel.
+4. In the confirmation buffer, run `:w` to apply the changes or `:q` to cancel.
 5. Restart Neovim to load the updated plugins.
 
 Checking for updates does not change installed plugin versions or the lock file.
@@ -54,7 +54,7 @@ Updates use vim.pack’s confirmation flow and preserve its build hooks.
 | `:PackCancel` | Stop an update check that is still running |
 
 `:PackCancel` also cancels a running local check. To cancel an update that has
-already reached the confirmation buffer, use `:quit`.
+already reached the confirmation buffer, use `:q`.
 
 ### Picker keys
 
