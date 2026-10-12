@@ -13,7 +13,11 @@ Browse and review updates for Neovim's built-in `vim.pack` manager through
 
 ## Requirements
 
-- Neovim 0.12+, tested against **0.12.6**.
+- **Supported:** Neovim 0.12.6.
+- **Best effort:** Other stable Neovim versions 0.12 or newer, with a warning
+  once per session. Prerelease/development builds, versions below 0.12, and
+  versions missing `vim.pack.get`, `vim.pack.update`, or `vim.system` are rejected.
+  Build metadata does not make a stable version a prerelease.
 - fzf-lua and its required fzf executable.
 - Git available on your PATH.
 
@@ -124,7 +128,7 @@ FZF_LUA_PATH=/path/to/fzf-lua python3 tests/ui.py
 Integration tests use temporary local repositories and isolated Neovim/Git
 configuration. The PTY test needs Python 3 and an existing fzf-lua checkout;
 it exercises the real picker and native cancellation. CI runs on Linux and
-macOS with Neovim 0.12.6. Formatting uses StyLua 2.6.0.
+macOS with supported Neovim 0.12.6. Formatting uses StyLua 2.6.0.
 
 See [AGENTS.md](AGENTS.md) for module boundaries and development requirements.
 Tags matching `v*` run CI before publishing a GitHub release.

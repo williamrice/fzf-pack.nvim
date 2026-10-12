@@ -2,7 +2,7 @@ local M = {}
 local compat = require("fzf-pack.compat")
 
 function M.lock_bytes()
-  local path = vim.fs.joinpath(vim.fn.stdpath("config"), "nvim-pack-lock.json")
+  local path = compat.lock_path()
   local file = io.open(path, "rb")
   if not file then
     return nil
@@ -28,7 +28,7 @@ function M.list()
   local bytes = M.lock_bytes()
   local lock = bytes and vim.json.decode(bytes) or { plugins = {} }
   assert(type(lock.plugins) == "table", "Invalid vim.pack lock file; initialize vim.pack first")
-  local dir = vim.fs.joinpath(vim.fn.stdpath("data"), "site", "pack", "core", "opt")
+  local dir = compat.plugin_dir()
   local installed = {}
   if vim.uv.fs_stat(dir) then
     for name, kind in vim.fs.dir(dir) do
@@ -52,7 +52,7 @@ function M.list()
     local data = lock.plugins[name]
     assert(data, "vim.pack needs installation/lock repair; initialize vim.pack before opening fzf-pack")
     assert(
-      p.rev == data.rev,
+      compat.cached_revision(p) == data.rev,
       "vim.pack's cached lock revisions differ from the lock file; restart Neovim before using fzf-pack"
     )
     cached[name] = true
