@@ -60,6 +60,11 @@ timer:start(
       stop_observer()
       -- Quit from the editor callback: injected :qa! keys depend on UI mode.
       vim.cmd("qa!")
+      -- fzf-lua's ExitPre closes its floating windows and can abort that quit.
+      -- Finish exiting after its window-close callbacks have run.
+      vim.schedule(function()
+        vim.cmd("qa!")
+      end)
       return
     end
     local screen = {}

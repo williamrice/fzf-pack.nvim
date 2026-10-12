@@ -135,6 +135,10 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         artifact = Path(tempfile.gettempdir()) / "fzf-pack-picker-screen.txt"
         artifact.write_text(update_screen)
         capture("success")
+        # Regression: teardown must also work while keys would go to fzf,
+        # rather than to Neovim's command line.
+        send(b":Pack\r")
+        wait(terminal)
     except Exception:
         capture("failure")
         raise
@@ -155,7 +159,10 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
                 # A blocking wait can leave the editor stuck writing to a full PTY.
                 drain()
                 time.sleep(0.05)
-            assert proc.poll() is not None, "Neovim did not exit after observer shutdown"
+            if proc.poll() is None:
+                capture("shutdown-failure")
+                raise AssertionError("Neovim did not exit after observer shutdown\n"
+                                     + transcript[-5000:].decode(errors="replace"))
             assert proc.returncode == 0, f"Neovim exited with status {proc.returncode}"
             assert (state_path.read_bytes() if state_path.exists() else None) == frozen_state, (
                 "Screen observer wrote after acknowledging shutdown"
