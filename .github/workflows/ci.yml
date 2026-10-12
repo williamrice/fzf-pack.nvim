@@ -46,11 +46,16 @@ jobs:
           sh -n tests/run.sh
 
   tests:
-    name: Neovim 0.12.6 supported / ${{ matrix.os }}
+    name: Neovim 0.12.6 supported / fzf-lua ${{ matrix.fzf_lua.name }} / ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-26]
+        fzf_lua:
+          - name: current
+            ref: 48d7c3db291a2c7c1825905c227a6bc81c83b837
+          - name: compat-0.7
+            ref: 47b85a25c0c0b2c20b4e75199ed01bb71e7814f5
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -100,11 +105,11 @@ jobs:
           with open(os.environ["GITHUB_PATH"], "a") as path:
               path.write(str(destination.parent) + "\n")
           PY
-      - name: Checkout fzf-lua test dependency
+      - name: Checkout fzf-lua ${{ matrix.fzf_lua.name }} test dependency
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ibhagwan/fzf-lua
-          ref: 48d7c3db291a2c7c1825905c227a6bc81c83b837
+          ref: ${{ matrix.fzf_lua.ref }}
           path: .dependencies/fzf-lua
           persist-credentials: false
       - name: Report test versions
@@ -123,7 +128,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: picker-${{ matrix.os }}
+          name: picker-${{ matrix.os }}-${{ matrix.fzf_lua.name }}
           path: artifacts/
           if-no-files-found: ignore
           retention-days: 7
