@@ -39,7 +39,9 @@ function M.inspect(p, opts, fetch, row)
   row.head = git.exec(p.path, { "rev-parse", "HEAD" }, opts.timeout)
   assert(p.spec.src == p.locked_src, "Configured source changed; reconcile with vim.pack first")
   if fetch then
-    local origin = git.exec(p.path, { "remote", "get-url", "origin" }, opts.timeout)
+    local urls = git.exec(p.path, { "config", "--null", "--get-all", "remote.origin.url" }, opts.timeout)
+    -- Git fetches from the first configured URL; remote get-url expands insteadOf aliases.
+    local origin = urls:match("^(.-)%z") or urls
     assert(origin == p.spec.src, "origin differs from configured source; reconcile with vim.pack first")
     git.exec(p.path, { "fetch", "--quiet", "--tags", "--force", "--recurse-submodules=no", "origin" }, opts.timeout)
   end

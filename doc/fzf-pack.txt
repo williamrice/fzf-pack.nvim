@@ -78,8 +78,9 @@ The public API does not expose all cached metadata for active plugins, so
 source/version-only cache differences cannot always be detected. The lock is
 not rechecked after the native confirmation opens, so external lock edits made
 during that window may be overwritten by vim.pack's native write. Concurrent
-external Git processes are not locked. Git URL insteadOf aliases are currently
-unsupported during update checks.
+external Git processes are not locked. Git URL insteadOf aliases work when the
+first raw origin URL matches the configured source; the checker reads this raw
+value because git remote get-url expands aliases.
 
 The timeout applies per checking Git process, not to native acceptance/hooks.
 Interactive Git credential prompts are disabled during checking. Normal Git
