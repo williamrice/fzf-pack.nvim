@@ -88,7 +88,16 @@ Picker keys for :PackUpdate:
     Tab / Shift-Tab    Select multiple results (standard fzf bindings).
     Enter              Review selected available changes.
     Ctrl-A             Review all available changes, even if filtered out.
+    Ctrl-O             Open the focused repository in the default browser.
     Esc                Close without applying changes.
+
+Ctrl-O works in both :Pack and :PackUpdate without closing the picker or changing
+its query or marked selections. It opens only the focused row. HTTP(S) sources
+retain their host and port, with trailing slashes and .git removed from the path.
+Common git@host:path and ssh://git@host/path sources for GitHub, GitLab and
+Codeberg convert to HTTPS. Local paths, credential-bearing URLs, unresolved
+Git/SSH aliases, custom SSH ports and other schemes show a notice instead.
+This action performs no fetch, checkout or lock write.
 
 ==============================================================================
 REVIEW AND SAFETY                                        *fzf-pack-review*
