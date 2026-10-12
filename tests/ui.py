@@ -14,7 +14,20 @@ import time
 root = Path(__file__).resolve().parent.parent
 assert os.environ.get("FZF_LUA_PATH"), "Set FZF_LUA_PATH to an existing fzf-lua checkout"
 
-with tempfile.TemporaryDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
+class FixtureDirectory(tempfile.TemporaryDirectory):
+    def cleanup(self):
+        try:
+            super().cleanup()
+        except OSError:
+            remaining = list(Path(self.name).rglob("*"))
+            print("Fixture cleanup failed; remaining paths:", remaining, flush=True)
+            for path in remaining:
+                if path.is_file() and path.name.endswith(".log"):
+                    print(path.read_text(errors="replace")[-4000:], flush=True)
+            raise
+
+
+with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
     env = dict(os.environ, TERM="xterm-256color", FZF_PACK_TEST_ROOT=str(root), FZF_PACK_TEST_TMP=tmp)
     env["NVIM_LOG_FILE"] = f"{tmp}/nvim.log"
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null")
