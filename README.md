@@ -87,7 +87,6 @@ See `:help fzf-pack` and [examples/minimal.lua](examples/minimal.lua).
   refuses mismatches without repairing the lock. The public API does not expose
   all cached metadata for active plugins, so source/version-only cache changes
   cannot always be detected.
-- Git `insteadOf` URL aliases are currently rejected by update checks.
 - A disk/lock inconsistency or changed plugin source must be reconciled with
   vim.pack before opening the picker.
 - Changes made after the native confirmation opens cannot be checked again

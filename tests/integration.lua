@@ -33,10 +33,14 @@ local function run()
   local old = commit(upstream, "initial")
   git(upstream, "tag", "-a", "v1.0.0", "-m", "annotated release")
   git(upstream, "branch", "topic")
+  local alias = "fixture:"
+  vim.env.GIT_CONFIG_COUNT = "1"
+  vim.env.GIT_CONFIG_KEY_0 = "url." .. upstream .. ".insteadOf"
+  vim.env.GIT_CONFIG_VALUE_0 = alias
   local broken = repo("broken-upstream")
   commit(broken, "broken initial")
   local specs = {
-    { name = "branch", src = upstream, version = "main" },
+    { name = "branch", src = alias, version = "main" },
     { name = "default", src = upstream },
     { name = "pinned", src = upstream, version = old },
     { name = "tagged", src = upstream, version = "v1.0.0" },
@@ -93,6 +97,24 @@ local function run()
   expect(local_rows.branch.target == old, "local listing does not fetch")
   expect(git(paths.branch, "rev-parse", "refs/remotes/origin/main") == old, "local refs unchanged")
   expect(local_rows.rollback.head == newer, "installed revision comes from HEAD, not lock")
+  expect(git(paths.branch, "config", "--get-all", "remote.origin.url") == alias, "vim.pack retains source alias")
+  local _, alias_rows = collect(true, { local_rows.branch.plugin })
+  expect(alias_rows.branch.target == excluded, "insteadOf source checks and fetches")
+  expect(git(paths.branch, "rev-parse", "HEAD") == old, "alias fetch preserves installed revision")
+  expect(pack.lock_bytes() == bytes, "alias fetch preserves lock bytes")
+  local fetched_ref = git(paths.branch, "rev-parse", "refs/remotes/origin/main")
+  git(paths.branch, "config", "--add", "remote.origin.url", upstream)
+  local _, multiple_rows = collect(true, { local_rows.branch.plugin })
+  expect(multiple_rows.branch.target == excluded, "first matching URL works with a secondary URL")
+  git(paths.branch, "config", "--replace-all", "remote.origin.url", upstream)
+  git(paths.branch, "config", "--add", "remote.origin.url", alias)
+  local _, mismatch_rows = collect(true, { local_rows.branch.plugin })
+  expect(
+    mismatch_rows.branch.error and mismatch_rows.branch.error:find("origin differs from configured source", 1, true),
+    "mismatched first URL is rejected"
+  )
+  expect(git(paths.branch, "rev-parse", "refs/remotes/origin/main") == fetched_ref, "mismatched origin does not fetch")
+  git(paths.branch, "config", "--replace-all", "remote.origin.url", alias)
   local result
   local system = vim.system
   local in_flight, peak, fetches = 0, 0, 0
@@ -278,6 +300,8 @@ local function run()
   expect(git(paths.topic, "rev-parse", "HEAD") == old, "unselected plugin untouched")
   local after = pack.lock_bytes()
   expect(after ~= bytes, "accept updates lock")
+  expect(git(paths.branch, "config", "--get-all", "remote.origin.url") == alias, "native update retains source alias")
+  expect(vim.json.decode(after).plugins.branch.src == alias, "native update retains alias in lock")
   local success = pcall(pack.review, { rows.topic })
   expect(not success, "stale lock snapshot refused")
 
