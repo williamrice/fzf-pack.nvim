@@ -46,7 +46,7 @@ jobs:
           sh -n tests/run.sh
 
   tests:
-    name: Neovim 0.12.6 / ${{ matrix.os }}
+    name: Neovim 0.12.6 supported / ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:

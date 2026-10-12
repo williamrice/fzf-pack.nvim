@@ -10,7 +10,11 @@ CONTENTS                                                   *fzf-pack*
 ==============================================================================
 SETUP                                                     *fzf-pack-setup*
 
-Requires Neovim 0.12+ (tested on 0.12.6), fzf-lua, Git and fzf.
+Supported on Neovim 0.12.6. Other stable Neovim versions 0.12 or newer are
+best effort and produce a warning once per session. Prerelease/development
+builds, versions below 0.12, and versions without vim.pack.get(),
+vim.pack.update() or vim.system() are rejected. Build metadata alone does not
+make a stable version a prerelease. Requires fzf-lua, Git and fzf.
 Install through your existing plugin manager or add this checkout to
 'runtimepath'. Setup is optional. Initialize |vim.pack.add()| specifications
 before using the commands.
@@ -77,7 +81,7 @@ lock-file bytes. The initial vim.pack call may install/repair plugins; fzf-pack
 refuses inconsistent disk/lock state and asks you to initialize vim.pack first.
 Changed source URLs are refused because native review can write those early.
 
-Version semantics follow the inspected 0.12.6 runtime: default origin/HEAD,
+Version semantics follow the supported 0.12.6 runtime: default origin/HEAD,
 remote branches before same-named tags, tags/commits, and greatest matching
 strict semver tag using |vim.version.range()|. Pinned commits remain pinned.
 Installed HEAD is read from Git because vim.pack.get().rev is a locked revision

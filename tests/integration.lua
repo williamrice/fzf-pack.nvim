@@ -93,6 +93,17 @@ local function run()
   for _, p in ipairs(plugins) do
     paths[p.spec.name] = p.path
   end
+  local lock_after_add = vim.json.decode(assert(pack.lock_bytes()))
+  expect(type(lock_after_add.plugins) == "table", "vim.pack serializes plugins as a lock map")
+  for _, p in ipairs(plugins) do
+    local name = p.spec.name
+    local data = assert(lock_after_add.plugins[name], "lock entry exists for " .. name)
+    expect(type(data.rev) == "string" and data.rev == p.rev, "serialized cached revision matches vim.pack for " .. name)
+    expect(data.src == p.spec.src, "serialized source matches vim.pack for " .. name)
+    local version = p.spec.version
+    local serialized = type(version) == "string" and ("'%s'"):format(version) or (version and tostring(version))
+    expect(data.version == serialized, "serialized version matches vim.pack for " .. name)
+  end
   git(paths.rollback, "fetch", "-q", "origin")
   git(paths.rollback, "checkout", "-q", newer)
   git(paths.diverged, "config", "user.name", "Fixture")
@@ -283,6 +294,45 @@ local function run()
     "checks preserve installed revisions"
   )
 
+  -- Compare every read-only target with native vim.pack's public confirmation.
+  local native_names, native_heads, native_targets = {}, {}, {}
+  for _, row in ipairs(result) do
+    if row.target and not row.error then
+      local name = row.plugin.spec.name
+      native_names[#native_names + 1] = name
+      native_heads[name] = row.head
+      native_targets[name] = row.target
+    end
+  end
+  for _, name in ipairs({ "default", "branch", "tagged", "pinned", "semver", "topic", "rollback", "diverged" }) do
+    expect(native_targets[name] ~= nil, "native parity includes " .. name)
+  end
+  vim.pack.update(native_names, { offline = true, force = false, target = "version" })
+  expect(pack.confirm_open(), "native target comparison opens confirmation")
+  local native_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local native_revisions, current_plugin = {}, nil
+  for _, line in ipairs(native_lines) do
+    current_plugin = line:match("^## ([^%s]+)") or current_plugin
+    local revision = line:match("^Revision after:%s*(%x+)") or line:match("^Revision:%s*(%x+)")
+    if current_plugin and revision then
+      native_revisions[current_plugin] = revision
+    end
+  end
+  for name, target in pairs(native_targets) do
+    expect(native_revisions[name] == target, "read-only target matches native vim.pack for " .. name)
+  end
+  vim.cmd.quit()
+  expect(
+    vim.wait(100, function()
+      return not pack.confirm_open()
+    end),
+    "native target comparison cancels"
+  )
+  expect(pack.lock_bytes() == bytes, "native target comparison preserves lock")
+  for name, head in pairs(native_heads) do
+    expect(git(paths[name], "rev-parse", "HEAD") == head, "native target comparison preserves HEAD for " .. name)
+  end
+
   -- A reviewed row becomes stale if either its installed HEAD or resolved
   -- target ref changes before handoff to native confirmation.
   local function review_snapshot(row)
@@ -463,6 +513,13 @@ local function run()
   expect(#events == 8, "native acceptance emits pre and post events for every selected update")
   local after = pack.lock_bytes()
   expect(after ~= bytes, "accept updates lock")
+  local lock_after_accept = vim.json.decode(after)
+  for _, name in ipairs({ "branch", "semver", "rollback", "diverged" }) do
+    expect(
+      lock_after_accept.plugins[name].rev == rows[name].target,
+      "native acceptance serializes target revision for " .. name
+    )
+  end
   expect(git(paths.branch, "config", "--get-all", "remote.origin.url") == alias, "native update retains source alias")
   expect(vim.json.decode(after).plugins.branch.src == alias, "native update retains alias in lock")
   local success = pcall(pack.review, { rows.topic })
