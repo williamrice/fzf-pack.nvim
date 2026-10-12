@@ -46,9 +46,21 @@ function M.list()
     )
   end
   local plugins = vim.pack.get(nil, { info = false })
+  local cached = {}
   for _, p in ipairs(plugins) do
-    p.locked_src = lock.plugins[p.spec.name].src
+    local name = p.spec.name
+    local data = lock.plugins[name]
+    assert(data, "vim.pack needs installation/lock repair; initialize vim.pack before opening fzf-pack")
+    assert(
+      p.rev == data.rev,
+      "vim.pack's cached lock revisions differ from the lock file; restart Neovim before using fzf-pack"
+    )
+    cached[name] = true
+    p.locked_src = data.src
     p.lock_bytes = bytes
+  end
+  for name in pairs(lock.plugins) do
+    assert(cached[name], "vim.pack needs installation/lock repair; initialize vim.pack before opening fzf-pack")
   end
   return plugins
 end

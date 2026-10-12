@@ -82,13 +82,18 @@ See `:help fzf-pack` and [examples/minimal.lua](examples/minimal.lua).
 
 ## Known limitations
 
-- Restart Neovim after changing the lock file externally. vim.pack caches lock
-  data, and accepting an update in the old session can overwrite external changes.
+- Restart Neovim after changing the lock file externally. Before checks and
+  review, fzf-pack compares disk revisions with vim.pack's cached revisions and
+  refuses mismatches without repairing the lock. The public API does not expose
+  all cached metadata for active plugins, so source/version-only cache changes
+  cannot always be detected.
 - Git `insteadOf` URL aliases are currently rejected by update checks.
 - A disk/lock inconsistency or changed plugin source must be reconciled with
   vim.pack before opening the picker.
-- Concurrent external Git operations are not locked out. Read the native
-  confirmation as the final description of the changes being applied.
+- Changes made after the native confirmation opens cannot be checked again
+  before vim.pack writes the lock, so external lock edits during that window
+  may be overwritten by the native write.
+- Concurrent external Git operations are not locked out.
 
 These are tracked in [GitHub issues](https://github.com/williamrice/fzf-pack.nvim/issues).
 `PackSync`, optional startup synchronization, and `PackClean` are planned.

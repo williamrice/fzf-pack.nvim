@@ -69,11 +69,17 @@ strict semver tag using |vim.version.range()|. Pinned commits remain pinned.
 Installed HEAD is read from Git because vim.pack.get().rev is a locked revision
 in 0.12.6. The small read-only resolver is mirrored; no private pack API is used.
 
-Before review, HEAD and target refs are revalidated. Restart Neovim after changing
-the lock file externally: vim.pack caches its lock data for the session. Git
-URL insteadOf aliases are currently unsupported during update checks.
-Concurrent external Git processes are not locked; read the native
-confirmation as the final description of what will change.
+Before review, HEAD and target refs are revalidated. fzf-pack also compares each
+public vim.pack cached revision with the disk lock before checking and review.
+If an external lock edit changes a revision, fzf-pack refuses to proceed and
+leaves the file untouched; restart Neovim to reconcile vim.pack's cache.
+
+The public API does not expose all cached metadata for active plugins, so
+source/version-only cache differences cannot always be detected. The lock is
+not rechecked after the native confirmation opens, so external lock edits made
+during that window may be overwritten by vim.pack's native write. Concurrent
+external Git processes are not locked. Git URL insteadOf aliases are currently
+unsupported during update checks.
 
 The timeout applies per checking Git process, not to native acceptance/hooks.
 Interactive Git credential prompts are disabled during checking. Normal Git
