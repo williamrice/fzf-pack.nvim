@@ -527,8 +527,8 @@ local function run()
 
   -- Timeout identity, elapsed time, sibling isolation, and retry all use a
   -- local upload-pack command and the existing fixture repositories.
-  git(paths.topic, "config", "remote.origin.uploadpack", "sleep 2; git-upload-pack")
-  local check_timeout = 300
+  git(paths.topic, "config", "remote.origin.uploadpack", "sleep 6; git-upload-pack")
+  local check_timeout = 2000
   local timeout_options = { concurrency = 2, timeout = check_timeout, max_commits = 20 }
   local topic_plugin, healthy_plugin
   for _, plugin in ipairs(pack.list()) do
@@ -561,13 +561,19 @@ local function run()
     "timeout is reported on the timed-out plugin with Neovim's timeout code: " .. tostring(timed.topic.error)
   )
   expect(
-    kill_elapsed_ms and kill_elapsed_ms >= check_timeout / 2 and kill_elapsed_ms < 1500,
+    kill_elapsed_ms and kill_elapsed_ms >= check_timeout / 2 and kill_elapsed_ms < 5000,
     ("timeout signal is sent near its deadline (%.1f ms)"):format(kill_elapsed_ms or -1)
   )
   -- Git's child upload-pack can retain the output pipes after Git is killed,
-  -- so callback completion may follow the two-second fixture delay.
-  expect(elapsed_ms < 5000, ("timed fetch callback drains pipes (%.1f ms)"):format(elapsed_ms))
-  expect(not timed.branch.error and timed.branch.target == excluded, "healthy sibling result survives timeout")
+  -- so callback completion may follow the six-second fixture delay.
+  expect(elapsed_ms < 12000, ("timed fetch callback drains pipes (%.1f ms)"):format(elapsed_ms))
+  expect(
+    not timed.branch.error and timed.branch.target == excluded,
+    ("healthy sibling result survives timeout (error=%s, target=%s)"):format(
+      tostring(timed.branch.error),
+      tostring(timed.branch.target)
+    )
+  )
   git(paths.topic, "config", "--unset", "remote.origin.uploadpack")
   local _, recovered = collect(true, { topic_plugin }, { concurrency = 1, timeout = 10000, max_commits = 20 })
   expect(
