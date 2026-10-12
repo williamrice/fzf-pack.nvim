@@ -58,6 +58,8 @@ local function run()
   git(upstream, "checkout", "-q", "topic")
   local topic = commit(upstream, "topic update")
   git(upstream, "checkout", "-q", "main")
+  -- A same-named tag must not shadow the remote branch in either resolver.
+  git(upstream, "tag", "main", old)
   local pack = require("fzf-pack.pack")
   local plugins = pack.list()
   local paths = {}
@@ -73,6 +75,8 @@ local function run()
   local bytes = pack.lock_bytes()
   local check = require("fzf-pack.check")
   local opts = { concurrency = 2, timeout = 10000, max_commits = 200 }
+  local unmatched = vim.deepcopy(plugins[1])
+  unmatched.spec.version = vim.version.range(">=9.0.0")
   local function collect(fetch, list, options)
     local result
     expect(
@@ -93,6 +97,12 @@ local function run()
     end
     return result, map
   end
+  local _, unmatched_rows = collect(false, { unmatched })
+  local unmatched_row = unmatched_rows[unmatched.spec.name]
+  expect(
+    unmatched_row.error and unmatched_row.error:find("No tags fit configured version constraint", 1, true),
+    "read-only resolver rejects an unmatched range"
+  )
   local _, local_rows = collect(false)
   expect(local_rows.branch.target == old, "local listing does not fetch")
   expect(git(paths.branch, "rev-parse", "refs/remotes/origin/main") == old, "local refs unchanged")
@@ -163,6 +173,7 @@ local function run()
   expect(rows.branch.target == excluded, "branch follows remote")
   expect(rows.default.target == excluded, "default branch follows origin HEAD")
   expect(rows.topic.target == topic, "nondefault branch")
+  expect(rows.branch.ref == "refs/remotes/origin/main", "branch wins over same-named tag")
   expect(rows.pinned.target == old and rows.pinned.status == "current", "pinned commit stays pinned")
   expect(rows.tagged.target == old, "annotated tag resolves commit")
   expect(rows.semver.target == newer, "semver excludes v2")
@@ -179,6 +190,44 @@ local function run()
     git(paths.branch, "rev-parse", "HEAD") == old and git(paths.diverged, "rev-parse", "HEAD") == divergent,
     "checks preserve installed revisions"
   )
+
+  -- A reviewed row becomes stale if either its installed HEAD or resolved
+  -- target ref changes before handoff to native confirmation.
+  local function review_snapshot(row)
+    local result, err
+    expect(check.review({ row }, opts, function(valid, failure)
+      result, err = valid, failure
+    end) ~= false, "snapshot validation starts")
+    expect(
+      vim.wait(10000, function()
+        return result ~= nil or err ~= nil
+      end, 10),
+      "snapshot validation finishes"
+    )
+    return result, err
+  end
+  git(paths.rollback, "checkout", "-q", old)
+  local head_valid, head_error = review_snapshot(rows.rollback)
+  expect(
+    not head_valid and tostring(head_error):find("Plugin changed since checking", 1, true),
+    "changed installed HEAD invalidates snapshot"
+  )
+  expect(
+    pack.lock_bytes() == bytes and not pack.confirm_open(),
+    "stale HEAD refusal preserves lock and closes confirmation"
+  )
+  git(paths.rollback, "checkout", "-q", newer)
+  git(paths.branch, "update-ref", "refs/remotes/origin/main", old)
+  local ref_valid, ref_error = review_snapshot(rows.branch)
+  expect(
+    not ref_valid and tostring(ref_error):find("Plugin changed since checking", 1, true),
+    "changed target ref invalidates snapshot"
+  )
+  expect(
+    pack.lock_bytes() == bytes and not pack.confirm_open(),
+    "stale ref refusal preserves lock and closes confirmation"
+  )
+  git(paths.branch, "update-ref", "refs/remotes/origin/main", excluded)
 
   -- Exercise the picker action wiring independently of terminal interaction.
   local captured
@@ -289,15 +338,28 @@ local function run()
       events[#events + 1] = { event = ev.event, name = ev.data.spec.name, kind = ev.data.kind }
     end,
   })
-  pack.review({ rows.branch, rows.semver })
+  pack.review({ rows.branch, rows.semver, rows.rollback, rows.diverged })
   vim.cmd.write()
   vim.wait(100, function()
     return not pack.confirm_open()
   end)
   expect(git(paths.branch, "rev-parse", "HEAD") == excluded, "write applies branch")
   expect(git(paths.semver, "rev-parse", "HEAD") == newer, "write applies constrained version")
-  expect(#events == 4 and events[1].kind == "update", "native build events preserved")
-  expect(git(paths.topic, "rev-parse", "HEAD") == old, "unselected plugin untouched")
+  expect(git(paths.rollback, "rev-parse", "HEAD") == old, "native acceptance applies rollback")
+  expect(git(paths.diverged, "rev-parse", "HEAD") == excluded, "native acceptance resolves divergence")
+  expect(git(paths.topic, "rev-parse", "HEAD") == old, "unselected topic remains untouched")
+  local event_counts = {}
+  for _, event in ipairs(events) do
+    event_counts[event.name] = event_counts[event.name] or { pre = 0, changed = 0 }
+    local key = event.event == "PackChangedPre" and "pre" or "changed"
+    event_counts[event.name][key] = event_counts[event.name][key] + 1
+    expect(event.kind == "update", "native update event kind")
+  end
+  for _, name in ipairs({ "branch", "semver", "rollback", "diverged" }) do
+    local count = event_counts[name]
+    expect(count and count.pre == 1 and count.changed == 1, "native build events preserved for " .. name)
+  end
+  expect(#events == 8, "native acceptance emits pre and post events for every selected update")
   local after = pack.lock_bytes()
   expect(after ~= bytes, "accept updates lock")
   expect(git(paths.branch, "config", "--get-all", "remote.origin.url") == alias, "native update retains source alias")
@@ -305,11 +367,55 @@ local function run()
   local success = pcall(pack.review, { rows.topic })
   expect(not success, "stale lock snapshot refused")
 
-  -- Timeout a real Git fetch via a local upload-pack command.
+  -- Timeout identity, elapsed time, sibling isolation, and retry all use a
+  -- local upload-pack command and the existing fixture repositories.
   git(paths.topic, "config", "remote.origin.uploadpack", "sleep 2; git-upload-pack")
-  local _, timed = collect(true, pack.list({}), { concurrency = 1, timeout = 100, max_commits = 20 })
-  expect(timed.topic.error ~= nil, "timed out fetch isolated")
+  local check_timeout = 300
+  local timeout_options = { concurrency = 2, timeout = check_timeout, max_commits = 20 }
+  local topic_plugin, healthy_plugin
+  for _, plugin in ipairs(pack.list()) do
+    if plugin.spec.name == "topic" then
+      topic_plugin = plugin
+    elseif plugin.spec.name == "branch" then
+      healthy_plugin = plugin
+    end
+  end
+  local system = vim.system
+  local started = vim.uv.hrtime()
+  local killed_at
+  vim.system = function(args, options, callback)
+    local process = system(args, options, callback)
+    if callback and options.cwd == paths.topic and vim.tbl_contains(args, "fetch") then
+      local kill = process.kill
+      process.kill = function(self, signal)
+        killed_at = killed_at or vim.uv.hrtime()
+        return kill(self, signal)
+      end
+    end
+    return process
+  end
+  local _, timed = collect(true, { topic_plugin, healthy_plugin }, timeout_options)
+  local elapsed_ms = (vim.uv.hrtime() - started) / 1e6
+  local kill_elapsed_ms = killed_at and (killed_at - started) / 1e6
+  vim.system = system
+  expect(
+    timed.topic.error and timed.topic.error:find("Git failed (124):", 1, true),
+    "timeout is reported on the timed-out plugin with Neovim's timeout code: " .. tostring(timed.topic.error)
+  )
+  expect(
+    kill_elapsed_ms and kill_elapsed_ms >= check_timeout / 2 and kill_elapsed_ms < 1500,
+    ("timeout signal is sent near its deadline (%.1f ms)"):format(kill_elapsed_ms or -1)
+  )
+  -- Git's child upload-pack can retain the output pipes after Git is killed,
+  -- so callback completion may follow the two-second fixture delay.
+  expect(elapsed_ms < 5000, ("timed fetch callback drains pipes (%.1f ms)"):format(elapsed_ms))
+  expect(not timed.branch.error and timed.branch.target == excluded, "healthy sibling result survives timeout")
   git(paths.topic, "config", "--unset", "remote.origin.uploadpack")
+  local _, recovered = collect(true, { topic_plugin }, { concurrency = 1, timeout = 10000, max_commits = 20 })
+  expect(
+    not recovered.topic.error and recovered.topic.target == topic,
+    "fetch recovers after timeout source is removed"
+  )
 
   -- New Neovim process: inactive specs restored from lock; no fetch or writes.
   vim.fn.rename(broken .. "-unavailable", broken)
