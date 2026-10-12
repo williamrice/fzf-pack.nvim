@@ -106,7 +106,7 @@ FZF_LUA_PATH=/path/to/fzf-lua python3 tests/ui.py
 Integration tests use temporary local repositories and isolated Neovim/Git
 configuration. The PTY test needs Python 3 and an existing fzf-lua checkout;
 it exercises the real picker and native cancellation. CI runs on Linux and
-macOS with Neovim 0.12.6. Formatting uses StyLua 2.5.2.
+macOS with Neovim 0.12.6. Formatting uses StyLua 2.6.0.
 
 See [AGENTS.md](AGENTS.md) for module boundaries and development requirements.
 Tags matching `v*` run CI before publishing a GitHub release.

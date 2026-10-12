@@ -20,17 +20,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
           version: v0.12.6
-      - uses: JohnnyMorganz/stylua-action@479972f01e665acfcba96ada452c36608bdbbb5e # v4
+      - uses: JohnnyMorganz/stylua-action@76fd70c03e6340ceaf673366712db9b20560b402 # v5.0.0
         with:
           token: ${{ github.token }}
-          version: 2.5.2
+          version: 2.6.0
           args: --check lua plugin tests examples
       - name: Check Lua syntax and help tags
         env:
@@ -50,28 +50,58 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: [ubuntu-24.04, macos-26]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1.6.1
         with:
           neovim: true
           version: v0.12.6
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.12'
-      - name: Install fzf on Linux
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y fzf
-      - name: Install fzf on macOS
-        if: runner.os == 'macOS'
-        run: command -v fzf >/dev/null || brew install fzf
+          python-version: '3.15.0'
+      - name: Install verified fzf release
+        env:
+          FZF_VERSION: 0.74.5
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import io
+          import os
+          import platform
+          import tarfile
+          import urllib.request
+          from pathlib import Path
+
+          checksums = {
+              "linux_amd64": "d47d7f882972c7d674dbbba998ffa4116e68379616ffac7695d0671e9a722c5f",
+              "linux_arm64": "cf058001da21724a469b714a29cf4aab9cbe860d218a0d6c1b5b661efad7784c",
+              "darwin_amd64": "aca6cab692e6c069e724a43070a448e18586c7c0fdd1139f6d487ec1680599ed",
+              "darwin_arm64": "ada808c7401b9949ce8842274ac16a6b6193fd32dcada396884a6a9a89e5985a",
+          }
+          arch = {"x86_64": "amd64", "arm64": "arm64", "aarch64": "arm64"}[platform.machine()]
+          target = platform.system().lower() + "_" + arch
+          version = os.environ["FZF_VERSION"]
+          url = f"https://github.com/junegunn/fzf/releases/download/v{version}/fzf-{version}-{target}.tar.gz"
+          with urllib.request.urlopen(url, timeout=60) as response:
+              archive = response.read()
+          assert hashlib.sha256(archive).hexdigest() == checksums[target], "fzf checksum mismatch"
+          # RUNNER_TEMP already exists; extract only the verified binary, no directories.
+          destination = Path(os.environ["RUNNER_TEMP"]) / "fzf"
+          with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as package:
+              member = package.getmember("fzf")
+              assert member.isfile(), "Expected a regular fzf binary"
+              destination.write_bytes(package.extractfile(member).read())
+          destination.chmod(0o755)
+          with open(os.environ["GITHUB_PATH"], "a") as path:
+              path.write(str(destination.parent) + "\n")
+          PY
       - name: Checkout fzf-lua test dependency
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ibhagwan/fzf-lua
           ref: 48d7c3db291a2c7c1825905c227a6bc81c83b837
@@ -91,7 +121,7 @@ jobs:
         run: python3 tests/ui.py
       - name: Upload picker diagnostics
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: picker-${{ matrix.os }}
           path: artifacts/
