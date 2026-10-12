@@ -55,8 +55,9 @@ examples installable, and keep README/help behavior consistent.
 ## Review and release
 
 Track outstanding correctness and engineering findings in GitHub issues.
-The initial MVP has known external-lock-cache and Git URL alias limitations;
-read the open issues before changing the update path.
+Remaining update-path limitations include external-lock-cache metadata that the
+public API does not expose for active plugins and lock edits during native
+confirmation. Read the open issues before changing the update path.
 
 Do not add machine-specific paths, credentials, logs, local state, or copied
 personal configuration. Use repository-local settings only. Commit, push,

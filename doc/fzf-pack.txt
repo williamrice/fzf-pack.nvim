@@ -110,6 +110,12 @@ the entire transport process tree. A transport child may keep inherited pipes
 open after Git exits. Its late result is ignored, and a new check can start while
 those pipes drain.
 
+Real-PTY CI is configured for Linux and macOS with supported Neovim 0.12.6 and
+fzf 0.74.5. It targets the current fzf-lua snapshot
+(48d7c3db291a2c7c1825905c227a6bc81c83b837) and an older 0.7 compatibility
+snapshot (47b85a25c0c0b2c20b4e75199ed01bb71e7814f5). The older ref is additional
+compatibility coverage and does not change the Neovim support contract.
+
 Future milestones: lock-file sync review, optional early startup synchronization
 (disabled by default), and inactive-plugin cleanup review. Not implemented yet.
 

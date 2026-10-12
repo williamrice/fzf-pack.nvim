@@ -130,6 +130,18 @@ configuration. The PTY test needs Python 3 and an existing fzf-lua checkout;
 it exercises the real picker and native cancellation. CI runs on Linux and
 macOS with supported Neovim 0.12.6. Formatting uses StyLua 2.6.0.
 
+The real-PTY CI matrix is configured to exercise fzf-lua's current upstream snapshot
+(`48d7c3db291a2c7c1825905c227a6bc81c83b837`) and the older `0.7` compatibility
+snapshot (`47b85a25c0c0b2c20b4e75199ed01bb71e7814f5`). fzf-lua has no GitHub
+releases, so CI pins both refs to exact commits. The older snapshot is extra
+compatibility coverage, not a recommendation or a change to the Neovim support
+contract above.
+
+When maintaining this matrix, recheck upstream refs, update the `current` pin
+from upstream `main`, and retain the compatibility snapshot. Change pins only
+after the real PTY suite passes on both Linux and macOS. Picker diagnostic
+artifacts include the OS and fzf-lua matrix label.
+
 See [AGENTS.md](AGENTS.md) for module boundaries and development requirements.
 Tags matching `v*` run CI before publishing a GitHub release.
 
