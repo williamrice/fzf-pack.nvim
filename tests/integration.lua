@@ -142,7 +142,7 @@ local function run()
     unmatched_row.error and unmatched_row.error:find("No tags fit configured version constraint", 1, true),
     "read-only resolver rejects an unmatched range"
   )
-  local _, local_rows = collect(false)
+  local local_result, local_rows = collect(false)
   expect(local_rows.branch.target == old, "local listing does not fetch")
   expect(git(paths.branch, "rev-parse", "refs/remotes/origin/main") == old, "local refs unchanged")
   expect(local_rows.rollback.head == newer, "installed revision comes from HEAD, not lock")
@@ -389,9 +389,50 @@ local function run()
     return setmetatable(class, { __index = self })
   end
   package.loaded["fzf-lua.previewer.builtin"] = { base = base }
+  package.loaded["fzf-lua.utils"] = {
+    ansi_from_hl = function(highlight, text)
+      return "<" .. highlight .. ">" .. text .. "</>"
+    end,
+  }
   local picker = require("fzf-pack.picker")
+  vim.api.nvim_set_hl(0, "FzfPackCurrent", { fg = "#123456" })
   picker.open(result, opts, true)
   expect(captured[2].fzf_opts["--multi"], "multi selection enabled")
+  expect(captured[2].fzf_opts["--ansi"], "ANSI status highlighting enabled")
+  expect(vim.api.nvim_get_hl(0, { name = "FzfPackCurrent" }).fg == 0x123456, "custom status highlight is preserved")
+  local highlighted_statuses = {}
+  for _, entry in ipairs(captured[1]) do
+    local id, name, visible = entry:match("^(%d+)\t([^\t]+)\t(.+)$")
+    local status = result[tonumber(id)].status
+    local expected = ({
+      current = "FzfPackCurrent",
+      update = "FzfPackUpdate",
+      rollback = "FzfPackRollback",
+      diverged = "FzfPackDiverged",
+      error = "FzfPackError",
+    })[status]
+    if expected then
+      expect(visible:find("<" .. expected .. ">" .. status .. "</>", 1, true), status .. " status highlight")
+    else
+      expect(not visible:find("<", 1, true), status .. " status remains neutral")
+    end
+    expect(not id:find("<", 1, true) and not name:find("<", 1, true), "hidden identity and name stay uncolored")
+    expect(not visible:match("<[^>]+>[^ ]+  "), "state column remains uncolored")
+    highlighted_statuses[status] = expected
+  end
+  for _, status in ipairs({ "current", "update", "rollback", "diverged", "error" }) do
+    expect(highlighted_statuses[status] ~= nil, status .. " status represented by picker fixture")
+  end
+  vim.api.nvim_set_hl(0, "FzfPackUpdate", {})
+  vim.api.nvim_exec_autocmds("ColorScheme", { modeline = false })
+  expect(
+    vim.api.nvim_get_hl(0, { name = "FzfPackUpdate", link = true }).link == "DiagnosticError",
+    "default highlight links are restored after colorscheme changes"
+  )
+  expect(
+    vim.api.nvim_get_hl(0, { name = "FzfPackCurrent" }).fg == 0x123456,
+    "custom status highlight survives colorscheme changes"
+  )
   local original = pack.review
   local selected
   pack.review = function(chosen)
@@ -423,6 +464,16 @@ local function run()
   )
   expect(#selected == 6, "review all includes available changes and excludes errors")
   pack.review = original
+
+  picker.open(local_result, opts, false)
+  local found_cached = false
+  for _, entry in ipairs(captured[1]) do
+    if entry:match("cached$") then
+      found_cached = true
+      expect(not entry:find("<FzfPack", 1, true), "cached status has no highlight sequence")
+    end
+  end
+  expect(captured[2].fzf_opts["--ansi"] and found_cached, "cached local status stays neutral with ANSI enabled")
 
   -- Long and wide-character names must keep the visible state column aligned.
   local long = vim.deepcopy(rows.branch)

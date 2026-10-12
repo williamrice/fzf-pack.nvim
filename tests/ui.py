@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import struct
 import subprocess
@@ -26,6 +27,9 @@ class FixtureDirectory(tempfile.TemporaryDirectory):
 
 with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
     env = dict(os.environ, TERM="xterm-256color", FZF_PACK_TEST_ROOT=str(root), FZF_PACK_TEST_TMP=tmp)
+    # The invoking agent/CI shell may disable colors globally. This fixture
+    # explicitly tests rendered colors in its isolated terminal.
+    env.pop("NO_COLOR", None)
     env["NVIM_LOG_FILE"] = f"{tmp}/nvim.log"
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null")
     for name in ("GIT_CONFIG", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS",
@@ -102,7 +106,31 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         capture("update-picker")
         assert all(name in update_screen for name in ("alpha", "beta", "pinned", "UI incoming subject",
                                                       "history truncated at 128 bytes")), update_screen
-        send(b"\t\t\r")
+
+        def row_attributes(screen_state, name, status):
+            pattern = re.compile(rf"({re.escape(name)})\s+(active|inactive)\s+({re.escape(status)})")
+            for row_index, line in enumerate(screen_state["screen"]):
+                match = pattern.search(line)
+                if match:
+                    attributes = screen_state["attributes"][row_index]
+                    return attributes[match.start(1)], attributes[match.start(3)]
+            raise AssertionError(f"Could not find {name} {status} list row\n" + "\n".join(screen_state["screen"]))
+
+        _, update_attribute = row_attributes(updated, "beta", "update")
+        _, current_attribute = row_attributes(updated, "pinned", "current")
+        assert update_attribute != current_attribute, updated
+        beta_name_attribute, _ = row_attributes(updated, "beta", "update")
+        assert update_attribute != beta_name_attribute, updated
+        before_tab = "\n".join(updated["screen"])
+        send(b"\t")
+        marked = wait(lambda s: terminal(s) and "3/3 (1)" in "\n".join(s.get("screen", [])))
+        marked_screen = "\n".join(marked["screen"])
+        assert marked_screen != before_tab and "alpha" in marked_screen and "update" in marked_screen
+        alpha_name_attribute, update_attribute = row_attributes(marked, "alpha", "update")
+        assert update_attribute != alpha_name_attribute
+        beta_name_attribute, update_attribute = row_attributes(marked, "beta", "update")
+        assert update_attribute != beta_name_attribute
+        send(b"\t\r")
         reviewed = wait(native)
         text = "\n".join(reviewed["lines"])
         assert "## alpha" in text and "## beta" in text and "## pinned" not in text, text

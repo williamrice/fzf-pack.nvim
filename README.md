@@ -51,6 +51,13 @@ through the list to see full installed and target revisions, the configured
 branch/tag/commit or semver constraint, and commit history. Details appear on
 the right in wide windows and below the list in narrow windows.
 
+Status text uses the `FzfPackCurrent`, `FzfPackUpdate`, `FzfPackRollback`,
+`FzfPackDiverged`, and `FzfPackError` highlight groups. Current defaults to
+green and update to red; rollback/diverged use the warning color and errors use
+red. These groups link to Neovim's diagnostic highlights, so themes control
+their colors. Reopen the picker after changing colorschemes to refresh colors.
+Override a status highlight with `vim.api.nvim_set_hl(0, "FzfPackUpdate", { fg = "#ff0000" })`.
+
 `:PackUpdate` reports completed and total plugin checks. `:PackCancel` stops
 queued work, signals active Git processes, and prevents canceled results from
 opening the picker. It does not cancel native confirmation or update handoff
