@@ -31,7 +31,7 @@ jobs:
         with:
           token: ${{ github.token }}
           version: 2.5.2
-          args: --check lua plugin tests/*.lua examples
+          args: --check lua plugin tests examples
       - name: Check Lua syntax and help tags
         env:
           NVIM_LOG_FILE: ${{ runner.temp }}/fzf-pack-check.log

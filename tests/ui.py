@@ -100,7 +100,11 @@ with tempfile.TemporaryDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         send(b":PackUpdate\r")
         wait(terminal)
         wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", [])))
-        send(b"alpha\x01")
+        send(b"alpha")
+        wait(lambda s: terminal(s) and "PackUpdate> alpha" in "\n".join(s.get("screen", []))
+             and "1/3" in "\n".join(s.get("screen", []))
+             and "UI incoming body" in "\n".join(s.get("screen", [])))
+        send(b"\x01")
         reviewed = wait(native)
         text = "\n".join(reviewed["lines"])
         assert "## alpha" in text and "## beta" in text, text

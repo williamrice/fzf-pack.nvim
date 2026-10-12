@@ -124,7 +124,9 @@ function M.open(rows, opts, checked)
       .. display("PLUGIN", "STATE", "STATUS"),
     previewer = Preview,
     actions = actions,
-    fzf_opts = { ["--multi"] = true, ["--delimiter"] = "\t", ["--with-nth"] = "3..", ["--nth"] = "2.." },
+    -- Matching fields refer to the transformed display, which has one field.
+    -- Searching 2.. here would exclude the entire displayed plugin row.
+    fzf_opts = { ["--multi"] = true, ["--delimiter"] = "\t", ["--with-nth"] = "3..", ["--nth"] = "1.." },
     winopts = {
       width = 0.95,
       height = 0.85,
