@@ -150,9 +150,13 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
                 time.sleep(0.05)
             assert stopped.exists(), "Screen observer did not acknowledge shutdown"
             frozen_state = state_path.read_bytes() if state_path.exists() else None
-            if proc.poll() is None:
-                send(b"\x1b:qa!\r")
-                proc.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            while proc.poll() is None and time.monotonic() < deadline:
+                # A blocking wait can leave the editor stuck writing to a full PTY.
+                drain()
+                time.sleep(0.05)
+            assert proc.poll() is not None, "Neovim did not exit after observer shutdown"
+            assert proc.returncode == 0, f"Neovim exited with status {proc.returncode}"
             assert (state_path.read_bytes() if state_path.exists() else None) == frozen_state, (
                 "Screen observer wrote after acknowledging shutdown"
             )

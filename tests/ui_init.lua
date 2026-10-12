@@ -58,6 +58,8 @@ timer:start(
     end
     if vim.fn.filereadable(test_tmp .. "/stop-observer") == 1 then
       stop_observer()
+      -- Quit from the editor callback: injected :qa! keys depend on UI mode.
+      vim.cmd("qa!")
       return
     end
     local screen = {}
