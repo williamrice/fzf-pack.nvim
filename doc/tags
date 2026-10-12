@@ -1,0 +1,7 @@
+:Pack	fzf-pack.txt	/*:Pack*
+:PackUpdate	fzf-pack.txt	/*:PackUpdate*
+fzf-pack	fzf-pack.txt	/*fzf-pack*
+fzf-pack-commands	fzf-pack.txt	/*fzf-pack-commands*
+fzf-pack-review	fzf-pack.txt	/*fzf-pack-review*
+fzf-pack-setup	fzf-pack.txt	/*fzf-pack-setup*
+fzf-pack.txt	fzf-pack.txt	/*fzf-pack.txt*

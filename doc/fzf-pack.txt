@@ -1,0 +1,86 @@
+*fzf-pack.txt*  An fzf-lua interface for vim.pack
+
+==============================================================================
+CONTENTS                                                   *fzf-pack*
+
+  1. Setup                                              |fzf-pack-setup|
+  2. Commands                                           |fzf-pack-commands|
+  3. Review and safety                                  |fzf-pack-review|
+
+==============================================================================
+SETUP                                                     *fzf-pack-setup*
+
+Requires Neovim 0.12+ (tested on 0.12.6), fzf-lua, Git and fzf.
+Install through your existing plugin manager or add this checkout to
+'runtimepath'. Setup is optional. Initialize |vim.pack.add()| specifications
+before using the commands.
+>lua
+  require('fzf-pack').setup({
+    concurrency = 4,       -- maximum simultaneous plugin checks
+    timeout = 30000,       -- milliseconds per Git process
+    max_commits = 200,     -- commits previewed per side of history
+  })
+<
+Options must be positive integers. There is no startup fetching or syncing.
+
+==============================================================================
+COMMANDS                                               *fzf-pack-commands*
+
+*:Pack*
+    Browse installed plugins. Uses local refs only, without fetching. Matching
+    results say "cached"; remote updates might exist. Enter simply closes.
+
+*:PackUpdate*
+    Check updates asynchronously, then open an fzf-lua picker. One plugin's
+    fetch failure does not prevent others from being reviewed. Simultaneous
+    checks and checks during native confirmation are refused.
+
+Rows form three aligned columns: name, active/inactive state, and status.
+Moving through rows updates the details pane, on the right in wide windows
+and below in narrow ones. It includes the branch/tag/commit or semver constraint,
+installed/target hashes, lock revision, source and path, plus incoming
+and removed commit subjects and bodies. Each side is capped by max_commits.
+Status: current, cached (local only), update, rollback, diverged, or error.
+
+Picker keys for :PackUpdate:
+    Tab / Shift-Tab    Select multiple results (standard fzf bindings).
+    Enter              Review selected available changes.
+    Ctrl-A             Review all available changes, even if filtered out.
+    Esc                Close without applying changes.
+
+==============================================================================
+REVIEW AND SAFETY                                        *fzf-pack-review*
+
+Selected changes are handed to |vim.pack.update()| with offline=true in its
+native confirmation buffer. Use |:write| to accept or |:quit| to cancel.
+Native vim.pack owns checkouts, stashes, submodule handling, help tags, lock
+updates and |PackChangedPre| / |PackChanged| events. Build hooks still work.
+Restart Neovim after acceptance to use updated plugin code.
+
+Checking fetches Git objects/refs but does not change HEAD or the lock file.
+Closing either picker or native review without writing preserves versions and
+lock-file bytes. The initial vim.pack call may install/repair plugins; fzf-pack
+refuses inconsistent disk/lock state and asks you to initialize vim.pack first.
+Changed source URLs are refused because native review can write those early.
+
+Version semantics follow the inspected 0.12.6 runtime: default origin/HEAD,
+remote branches before same-named tags, tags/commits, and greatest matching
+strict semver tag using |vim.version.range()|. Pinned commits remain pinned.
+Installed HEAD is read from Git because vim.pack.get().rev is a locked revision
+in 0.12.6. The small read-only resolver is mirrored; no private pack API is used.
+
+Before review, HEAD and target refs are revalidated. Restart Neovim after changing
+the lock file externally: vim.pack caches its lock data for the session. Git
+URL insteadOf aliases are currently unsupported during update checks.
+Concurrent external Git processes are not locked; read the native
+confirmation as the final description of what will change.
+
+The timeout applies per checking Git process, not to native acceptance/hooks.
+Interactive Git credential prompts are disabled during checking. Normal Git
+config and credential helpers apply. Submodules are handled on native acceptance,
+not recursively fetched by the checker.
+
+Future milestones: lock-file sync review, optional early startup synchronization
+(disabled by default), and inactive-plugin cleanup review. Not implemented yet.
+
+vim:tw=78:ts=8:ft=help:norl:

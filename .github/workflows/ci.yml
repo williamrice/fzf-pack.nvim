@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Formatting and syntax
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+        with:
+          neovim: true
+          version: v0.12.6
+      - uses: JohnnyMorganz/stylua-action@479972f01e665acfcba96ada452c36608bdbbb5e # v4
+        with:
+          token: ${{ github.token }}
+          version: 2.5.2
+          args: --check lua plugin tests/*.lua examples
+      - name: Check Lua syntax and help tags
+        env:
+          NVIM_LOG_FILE: ${{ runner.temp }}/fzf-pack-check.log
+        run: |
+          nvim --headless -u NONE -i NONE -l tests/check.lua
+          git diff --exit-code -- doc/tags
+      - name: Check Python syntax and shell syntax
+        env:
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/pycache
+        run: |
+          python3 -m py_compile tests/ui.py
+          sh -n tests/run.sh
+
+  tests:
+    name: Neovim 0.12.6 / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: rhysd/action-setup-vim@febef33995d6649302e9d88dda81e071b68f16a7 # v1
+        with:
+          neovim: true
+          version: v0.12.6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install fzf on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fzf
+      - name: Install fzf on macOS
+        if: runner.os == 'macOS'
+        run: command -v fzf >/dev/null || brew install fzf
+      - name: Checkout fzf-lua test dependency
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ibhagwan/fzf-lua
+          ref: 48d7c3db291a2c7c1825905c227a6bc81c83b837
+          path: .dependencies/fzf-lua
+          persist-credentials: false
+      - name: Report test versions
+        run: |
+          nvim --version
+          git --version
+          fzf --version
+      - name: Integration tests
+        run: sh tests/run.sh
+      - name: Real terminal picker tests
+        env:
+          FZF_LUA_PATH: ${{ github.workspace }}/.dependencies/fzf-lua
+          FZF_PACK_UI_ARTIFACTS: ${{ github.workspace }}/artifacts
+        run: python3 tests/ui.py
+      - name: Upload picker diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: picker-${{ matrix.os }}
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
