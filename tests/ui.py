@@ -21,9 +21,6 @@ class FixtureDirectory(tempfile.TemporaryDirectory):
         except OSError:
             remaining = list(Path(self.name).rglob("*"))
             print("Fixture cleanup failed; remaining paths:", remaining, flush=True)
-            for path in remaining:
-                if path.is_file() and path.name.endswith(".log"):
-                    print(path.read_text(errors="replace")[-4000:], flush=True)
             raise
 
 
@@ -138,16 +135,31 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         artifact = Path(tempfile.gettempdir()) / "fzf-pack-picker-screen.txt"
         artifact.write_text(update_screen)
         capture("success")
-        print(f"PASS: actual picker rendering, bodies, Tab multi-selection, filtered review-all, cancellation; screen: {artifact}")
     except Exception:
         capture("failure")
         raise
     finally:
-        if proc.poll() is None:
-            try:
+        try:
+            # The TUI process exiting does not establish that the editor's
+            # scheduled screen writer has stopped. Quiesce it before teardown.
+            Path(tmp, "stop-observer").touch()
+            stopped = Path(tmp, "observer-stopped")
+            deadline = time.monotonic() + 5
+            while not stopped.exists() and time.monotonic() < deadline:
+                drain()
+                time.sleep(0.05)
+            assert stopped.exists(), "Screen observer did not acknowledge shutdown"
+            frozen_state = state_path.read_bytes() if state_path.exists() else None
+            if proc.poll() is None:
                 send(b"\x1b:qa!\r")
                 proc.wait(timeout=5)
-            except Exception:
+            assert (state_path.read_bytes() if state_path.exists() else None) == frozen_state, (
+                "Screen observer wrote after acknowledging shutdown"
+            )
+        finally:
+            if proc.poll() is None:
                 proc.kill()
                 proc.wait()
-        os.close(master)
+            os.close(master)
+
+print(f"PASS: picker rendering, selection, cancellation, observer shutdown and fixture cleanup; screen: {artifact}")
