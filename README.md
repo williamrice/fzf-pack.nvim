@@ -77,12 +77,16 @@ require('fzf-pack').setup({
   concurrency = 4,   -- maximum simultaneous plugin checks
   timeout = 30000,   -- milliseconds per checking Git process
   max_commits = 200, -- preview limit on each side of history
+  max_log_bytes = 65536, -- history output byte limit per side and plugin
 })
 ```
 
 All options are positive integers. The timeout covers checking, not native
 acceptance or build hooks. Git credential prompts are disabled during checks;
-normal credential helpers still apply.
+normal credential helpers still apply. History bodies are streamed into a
+bounded capture; each incoming and removed side is limited independently.
+Section labels and truncation notices are outside the byte limit. History is
+collected during checks; each row's formatted preview is cached on first display.
 
 See `:help fzf-pack` and [examples/minimal.lua](examples/minimal.lua).
 

@@ -46,6 +46,7 @@ function M.open(rows, opts, checked)
   assert(ok, "fzf-pack could not load fzf-lua: " .. tostring(fzf))
   assert(type(fzf.fzf_exec) == "function", "fzf-pack requires fzf-lua.fzf_exec")
   local entries, by_id = {}, {}
+  local preview_cache = {}
   local name_width = 12
   for _, row in ipairs(rows) do
     name_width = math.max(name_width, math.min(24, vim.fn.strdisplaywidth(clean(row.plugin.spec.name))))
@@ -80,7 +81,12 @@ function M.open(rows, opts, checked)
   function Preview:populate_preview_buf(entry)
     local row = find(entry)
     local buf = self:get_tmp_buffer()
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, row and M.preview(row) or {})
+    local lines = row and preview_cache[row]
+    if row and not lines then
+      lines = M.preview(row)
+      preview_cache[row] = lines
+    end
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines or {})
     self:set_preview_buf(buf)
     self.win:update_preview_scrollbar()
   end

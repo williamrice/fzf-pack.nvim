@@ -86,10 +86,12 @@ with tempfile.TemporaryDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         send(b"\x1b")
         assert wait(closed)["unchanged"]
         send(b":PackUpdate\r")
-        updated = wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", [])))
+        updated = wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", []))
+                       and "history truncated at 128 bytes" in "\n".join(s.get("screen", [])))
         update_screen = "\n".join(updated["screen"])
         capture("update-picker")
-        assert all(name in update_screen for name in ("alpha", "beta", "pinned", "UI incoming subject")), update_screen
+        assert all(name in update_screen for name in ("alpha", "beta", "pinned", "UI incoming subject",
+                                                      "history truncated at 128 bytes")), update_screen
         send(b"\t\t\r")
         reviewed = wait(native)
         text = "\n".join(reviewed["lines"])
@@ -99,7 +101,8 @@ with tempfile.TemporaryDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert wait(closed)["unchanged"]
         send(b":PackUpdate\r")
         wait(terminal)
-        wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", [])))
+        wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", []))
+             and "history truncated at 128 bytes" in "\n".join(s.get("screen", [])))
         send(b"alpha")
         wait(lambda s: terminal(s) and "PackUpdate> alpha" in "\n".join(s.get("screen", []))
              and "1/3" in "\n".join(s.get("screen", []))

@@ -17,8 +17,31 @@ end
 local function commit(path, subject, body)
   vim.fn.writefile({ subject }, path .. "/content")
   git(path, "add", ".")
-  git(path, "commit", "-qm", subject, "-m", body or (subject .. " body"))
+  local message_path = tmp .. "/commit-message"
+  vim.fn.writefile(vim.split(subject .. "\n\n" .. (body or (subject .. " body")), "\n"), message_path)
+  git(path, "commit", "-q", "-F", message_path)
   return git(path, "rev-parse", "HEAD")
+end
+local function valid_utf8(s)
+  local i = 1
+  while i <= #s do
+    local first = s:byte(i)
+    local width = first <= 0x7F and 1
+      or (first >= 0xC2 and first <= 0xDF) and 2
+      or (first >= 0xE0 and first <= 0xEF) and 3
+      or (first >= 0xF0 and first <= 0xF4) and 4
+    if not width or i + width - 1 > #s then
+      return false
+    end
+    for j = i + 1, i + width - 1 do
+      local byte = s:byte(j)
+      if byte < 0x80 or byte > 0xBF then
+        return false
+      end
+    end
+    i = i + width
+  end
+  return true
 end
 local function repo(name)
   local path = tmp .. "/" .. name
@@ -53,7 +76,8 @@ local function run()
   vim.pack.add(specs, { confirm = false, load = false })
   local newer = commit(upstream, "incoming subject", "incoming body\n\nMore details.")
   git(upstream, "tag", "v1.1.0")
-  local excluded = commit(upstream, "outside semver range")
+  local incoming_body = "incoming body\n" .. string.rep("payload界", 16384)
+  local excluded = commit(upstream, "outside semver range", incoming_body)
   git(upstream, "tag", "v2.0.0")
   git(upstream, "checkout", "-q", "topic")
   local topic = commit(upstream, "topic update")
@@ -61,6 +85,9 @@ local function run()
   -- A same-named tag must not shadow the remote branch in either resolver.
   git(upstream, "tag", "main", old)
   local pack = require("fzf-pack.pack")
+  local config = require("fzf-pack")
+  expect(config.options.max_log_bytes == 65536, "default per-side history byte limit")
+  expect(not pcall(config.setup, { max_log_bytes = 0 }), "history byte limit must be positive")
   local plugins = pack.list()
   local paths = {}
   for _, p in ipairs(plugins) do
@@ -70,11 +97,12 @@ local function run()
   git(paths.rollback, "checkout", "-q", newer)
   git(paths.diverged, "config", "user.name", "Fixture")
   git(paths.diverged, "config", "user.email", "fixture@example.invalid")
-  local divergent = commit(paths.diverged, "removed subject", "removed body")
+  local removed_body = "removed body\n" .. string.rep("removed界", 16384)
+  local divergent = commit(paths.diverged, "removed subject", removed_body)
   vim.fn.rename(broken, broken .. "-unavailable")
   local bytes = pack.lock_bytes()
   local check = require("fzf-pack.check")
-  local opts = { concurrency = 2, timeout = 10000, max_commits = 200 }
+  local opts = { concurrency = 2, timeout = 10000, max_commits = 200, max_log_bytes = 1024 }
   local unmatched = vim.deepcopy(plugins[1])
   unmatched.spec.version = vim.version.range(">=9.0.0")
   local function collect(fetch, list, options)
@@ -185,6 +213,70 @@ local function run()
     preview:find("incoming body", 1, true) and preview:find("removed body", 1, true),
     "subjects and bodies on both sides"
   )
+  expect(select(2, preview:gsub("truncated", "")) == 2, "both oversized history sides show truncation")
+  expect(#table.concat(rows.diverged.log, "\n") <= 2 * opts.max_log_bytes + 512, "history output stays byte bounded")
+  local _, tiny_rows =
+    collect(false, { rows.rollback.plugin, rows.diverged.plugin }, vim.tbl_extend("force", opts, { max_log_bytes = 1 }))
+  expect(tiny_rows.rollback.status == "rollback", "tiny history budget preserves rollback classification")
+  expect(tiny_rows.diverged.status == "diverged", "tiny history budget preserves divergence classification")
+  expect(
+    select(2, table.concat(tiny_rows.diverged.log, "\n"):gsub("truncated", "")) == 2,
+    "tiny budget reports truncation on both sides"
+  )
+
+  local raw_incoming = vim
+    .system({
+      "git",
+      "-C",
+      paths.branch,
+      "log",
+      "--no-color",
+      "--topo-order",
+      "--right-only",
+      "--max-count=" .. opts.max_commits,
+      "--format=commit %h%n%s%n%b",
+      rows.branch.head .. "..." .. rows.branch.target,
+      "--",
+    }, { text = true })
+    :wait()
+  expect(raw_incoming.code == 0, "full history fixture is readable")
+  local changelog = require("fzf-pack.changelog")
+  local function read_changelog(options)
+    local result, failure
+    require("fzf-pack.git").run(function()
+      return changelog.read(paths.branch, rows.branch.head, rows.branch.target, options)
+    end, function(value, err)
+      result, failure = value, err
+    end)
+    expect(
+      vim.wait(30000, function()
+        return result ~= nil or failure ~= nil
+      end, 10),
+      "bounded changelog read finishes"
+    )
+    assert(not failure, failure)
+    return result
+  end
+  local exact_log = read_changelog(vim.tbl_extend("force", opts, { max_log_bytes = #raw_incoming.stdout }))
+  expect(not table.concat(exact_log, "\n"):find("truncated", 1, true), "exact byte budget is not marked truncated")
+  local short_log = read_changelog(vim.tbl_extend("force", opts, { max_log_bytes = #raw_incoming.stdout - 1 }))
+  expect(table.concat(short_log, "\n"):find("truncated", 1, true), "one byte below output size is truncated")
+  local multibyte_at = assert(raw_incoming.stdout:find("界", 1, true))
+  local boundary_log = read_changelog(vim.tbl_extend("force", opts, { max_log_bytes = multibyte_at }))
+  expect(valid_utf8(boundary_log[2]), "byte cap preserves a complete UTF-8 boundary")
+  expect(table.concat(boundary_log, "\n"):find("truncated", 1, true), "UTF-8 boundary truncation is visible")
+
+  local many_plugins = {}
+  for i = 1, 12 do
+    local plugin = vim.deepcopy(rows.diverged.plugin)
+    plugin.spec.name = "bounded-row-" .. i
+    many_plugins[i] = plugin
+  end
+  local _, many_rows = collect(false, many_plugins, opts)
+  for _, row in pairs(many_rows) do
+    expect(row.status == "diverged", "many changed rows retain independent status")
+    expect(#table.concat(row.log, "\n") <= 2 * opts.max_log_bytes + 512, "many changed rows remain byte bounded")
+  end
   expect(pack.lock_bytes() == bytes, "fetch check preserves lock bytes")
   expect(
     git(paths.branch, "rev-parse", "HEAD") == old and git(paths.diverged, "rev-parse", "HEAD") == divergent,
@@ -315,7 +407,16 @@ local function run()
     expect(buf == buffer, "preview uses detail buffer")
   end
   instance.win = { update_preview_scrollbar = function() end }
+  local original_preview = picker.preview
+  local preview_calls = 0
+  picker.preview = function(row)
+    preview_calls = preview_calls + 1
+    return original_preview(row)
+  end
   instance:populate_preview_buf(captured[1][2])
+  instance:populate_preview_buf(captured[1][2])
+  expect(preview_calls == 1, "formatted preview is cached for the picker lifetime")
+  picker.preview = original_preview
   local rendered = table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n")
   expect(
     rendered:find("short (active)", 1, true) and rendered:find(old, 1, true),
