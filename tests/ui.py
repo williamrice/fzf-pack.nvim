@@ -112,11 +112,11 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert wait(closed)["unchanged"]
         send(b":PackUpdate\r")
         updated = wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", []))
-                       and "history truncated at 128 bytes" in "\n".join(s.get("screen", [])))
+                       and "history truncated at 300 bytes" in "\n".join(s.get("screen", [])))
         update_screen = "\n".join(updated["screen"])
         capture("update-picker")
         assert all(name in update_screen for name in ("alpha", "beta", "pinned", "UI incoming subject",
-                                                      "history truncated at 128 bytes")), update_screen
+                                                      "history truncated at 300 bytes", "[BREAKING CHANGE]")), update_screen
 
         def row_attributes(screen_state, name, status):
             pattern = re.compile(rf"({re.escape(name)})\s+(active|inactive)\s+({re.escape(status)})")
@@ -132,6 +132,48 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert update_attribute != current_attribute, updated
         beta_name_attribute, _ = row_attributes(updated, "beta", "update")
         assert update_attribute != beta_name_attribute, updated
+
+        def assert_commit_rendered(screen_state, subject, body, expected_highlight):
+            screen = screen_state["screen"]
+            attributes = screen_state["attributes"]
+            header_position = subject_position = body_position = None
+            for row_index, line in enumerate(screen):
+                header = re.search(r"(?:^|│)(commit [0-9a-f]+(?:\s+\[BREAKING CHANGE\])?)\s*(?:│|$)", line)
+                if header and row_index + 1 < len(screen) and subject in screen[row_index + 1]:
+                    header_position = (row_index, header.start(1))
+                if subject in line:
+                    subject_position = (row_index, line.index(subject))
+                if body in line:
+                    body_position = (row_index, line.index(body))
+            assert header_position and subject_position and body_position, screen
+            header_attribute = attributes[header_position[0]][header_position[1]]
+            subject_attribute = attributes[subject_position[0]][subject_position[1]]
+            body_attribute = attributes[body_position[0]][body_position[1]]
+            highlight = screen_state[expected_highlight]
+            if expected_highlight == "commit_highlight":
+                assert header_attribute != subject_attribute and header_attribute != body_attribute, screen
+                assert highlight.get("bold") is True and highlight.get("fg") == 0x2468AC, highlight
+            else:
+                assert header_attribute == subject_attribute and header_attribute != body_attribute, screen
+                assert highlight.get("bold") is True and highlight.get("fg") == 0xFF0000 \
+                    and highlight.get("ctermfg") == 9 and highlight.get("bg") is None, highlight
+                warning = "[BREAKING CHANGE]"
+                header_line = screen[header_position[0]]
+                warning_attribute = attributes[header_position[0]][header_line.index(warning)]
+                assert warning_attribute == header_attribute, screen
+                for text in ("BREAKING CHANGE: UI API changes", "Migrate callers"):
+                    footer_position = next((
+                        (row_index, line.index(text))
+                        for row_index, line in enumerate(screen)
+                        if text in line
+                    ), None)
+                    assert footer_position, screen
+                    footer_attribute = attributes[footer_position[0]][footer_position[1]]
+                    assert footer_attribute == header_attribute and footer_attribute != body_attribute, screen
+
+        assert_commit_rendered(updated, "UI incoming subject", "UI incoming body", "breaking_highlight")
+        assert_commit_rendered(updated, "UI normal subject", "UI normal body", "commit_highlight")
+        assert "BREAKING CHANGE: UI API changes" in update_screen and "Migrate callers" in update_screen, update_screen
         before_tab = "\n".join(updated["screen"])
         send(b"\t")
         marked = wait(lambda s: terminal(s) and "3/3 (1)" in "\n".join(s.get("screen", [])))
@@ -151,7 +193,7 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         send(b":PackUpdate\r")
         wait(terminal)
         wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", []))
-             and "history truncated at 128 bytes" in "\n".join(s.get("screen", [])))
+             and "history truncated at 300 bytes" in "\n".join(s.get("screen", [])))
         send(b"alpha")
         wait(lambda s: terminal(s) and "PackUpdate> alpha" in "\n".join(s.get("screen", []))
              and "1/3" in "\n".join(s.get("screen", []))
@@ -171,6 +213,23 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
             path = env["XDG_DATA_HOME"] + "/nvim/site/pack/core/opt/" + name
             head = subprocess.check_output(["git", "-C", path, "rev-parse", "HEAD"], text=True).strip()
             assert head == final["old"]
+        alpha_path = Path(env["XDG_DATA_HOME"]) / "nvim/site/pack/core/opt/alpha"
+        subprocess.run(["git", "-C", str(alpha_path), "reset", "--hard", final["new"]],
+                       check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["git", "-C", str(Path(tmp) / "upstream"), "update-ref",
+                        "refs/heads/main", final["old"]], check=True, stdout=subprocess.DEVNULL)
+        send(b":PackUpdate\r")
+        removed = wait(lambda s: terminal(s)
+                       and "Removed commits" in "\n".join(s.get("screen", []))
+                       and "UI incoming body" in "\n".join(s.get("screen", []))
+                       and "[BREAKING CHANGE]" in "\n".join(s.get("screen", [])))
+        removed_screen = "\n".join(removed["screen"])
+        assert "UI incoming subject" in removed_screen, removed_screen
+        assert_commit_rendered(removed, "UI incoming subject", "UI incoming body", "breaking_highlight")
+        assert_commit_rendered(removed, "UI normal subject", "UI normal body", "commit_highlight")
+        capture("removed-picker")
+        send(b"\x1b")
+        assert wait(closed)["unchanged"]
         artifact = Path(tempfile.gettempdir()) / "fzf-pack-picker-screen.txt"
         artifact.write_text(update_screen)
         capture("success")
