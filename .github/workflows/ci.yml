@@ -50,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-26]
+        os: [ubuntu-24.04]
         fzf_lua:
           - name: current
             ref: 48d7c3db291a2c7c1825905c227a6bc81c83b837
@@ -85,8 +85,6 @@ jobs:
           checksums = {
               "linux_amd64": "d47d7f882972c7d674dbbba998ffa4116e68379616ffac7695d0671e9a722c5f",
               "linux_arm64": "cf058001da21724a469b714a29cf4aab9cbe860d218a0d6c1b5b661efad7784c",
-              "darwin_amd64": "aca6cab692e6c069e724a43070a448e18586c7c0fdd1139f6d487ec1680599ed",
-              "darwin_arm64": "ada808c7401b9949ce8842274ac16a6b6193fd32dcada396884a6a9a89e5985a",
           }
           arch = {"x86_64": "amd64", "arm64": "arm64", "aarch64": "arm64"}[platform.machine()]
           target = platform.system().lower() + "_" + arch
