@@ -37,10 +37,36 @@ vim.g.ui_lock_before = require("fzf-pack.pack").lock_bytes()
 require("fzf-pack").setup({ max_log_bytes = 128 })
 vim.g.ui_ready = true
 local timer = vim.uv.new_timer()
+local stopped = false
+local function stop_observer()
+  if stopped then
+    return
+  end
+  stopped = true
+  timer:stop()
+  timer:close()
+  vim.fn.writefile({}, test_tmp .. "/observer-stopped")
+end
+vim.api.nvim_create_autocmd("VimLeavePre", { callback = stop_observer })
 timer:start(
   100,
   100,
   vim.schedule_wrap(function()
+    -- Closing a timer does not cancel callbacks already queued by schedule_wrap.
+    if stopped then
+      return
+    end
+    if vim.fn.filereadable(test_tmp .. "/stop-observer") == 1 then
+      stop_observer()
+      -- Quit from the editor callback: injected :qa! keys depend on UI mode.
+      vim.cmd("qa!")
+      -- fzf-lua's ExitPre closes its floating windows and can abort that quit.
+      -- Finish exiting after its window-close callbacks have run.
+      vim.schedule(function()
+        vim.cmd("qa!")
+      end)
+      return
+    end
     local screen = {}
     for r = 1, vim.o.lines do
       local line = {}
