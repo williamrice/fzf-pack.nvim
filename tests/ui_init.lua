@@ -2,6 +2,10 @@ vim.opt.runtimepath:prepend(assert(vim.env.FZF_PACK_TEST_ROOT))
 vim.opt.runtimepath:prepend(assert(vim.env.FZF_LUA_PATH))
 vim.opt.packpath:prepend(vim.fn.stdpath("data") .. "/site")
 vim.opt.swapfile = false
+vim.opt.termguicolors = true
+vim.api.nvim_set_hl(0, "DiagnosticOk", { fg = "#11aa22" })
+vim.api.nvim_set_hl(0, "DiagnosticError", { fg = "#dd2233" })
+vim.api.nvim_set_hl(0, "DiagnosticWarn", { fg = "#eeaa00" })
 local test_tmp = assert(vim.env.FZF_PACK_TEST_TMP)
 local path = test_tmp .. "/upstream"
 local source = "file://" .. path
@@ -68,18 +72,23 @@ timer:start(
       return
     end
     local screen = {}
+    local attributes = {}
     for r = 1, vim.o.lines do
       local line = {}
+      local row_attributes = {}
       for c = 1, vim.o.columns do
         line[#line + 1] = vim.fn.screenstring(r, c)
+        row_attributes[#row_attributes + 1] = vim.fn.screenattr(r, c)
       end
       screen[#screen + 1] = table.concat(line)
+      attributes[#attributes + 1] = row_attributes
     end
     local state = {
       ready = true,
       buftype = vim.bo.buftype,
       filetype = vim.bo.filetype,
       screen = screen,
+      attributes = attributes,
       lines = vim.api.nvim_buf_get_lines(0, 0, -1, false),
       unchanged = require("fzf-pack.pack").lock_bytes() == vim.g.ui_lock_before,
       confirmed = require("fzf-pack.pack").confirm_open(),

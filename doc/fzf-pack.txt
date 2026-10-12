@@ -59,6 +59,14 @@ installed/target hashes, lock revision, source and path, plus incoming
 and removed commit subjects and bodies. Each side is capped by max_commits and
 max_log_bytes; oversized history shows a truncation notice.
 Status: current, cached (local only), update, rollback, diverged, or error.
+Visible status text uses the FzfPackCurrent, FzfPackUpdate, FzfPackRollback,
+FzfPackDiverged, and FzfPackError highlight groups. Current defaults to green
+and update to red; rollback/diverged use the warning color and errors use red.
+They link to Neovim's diagnostic highlights, so the theme controls their colors.
+Reopen the picker after changing colorschemes to refresh colors; cached remains
+uncolored. For example, set a custom update color with:
+
+    :lua vim.api.nvim_set_hl(0, "FzfPackUpdate", { fg = "#ff0000" })
 
 Picker keys for :PackUpdate:
     Tab / Shift-Tab    Select multiple results (standard fzf bindings).

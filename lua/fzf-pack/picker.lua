@@ -1,4 +1,42 @@
 local M = {}
+local highlight_autocmd = false
+
+local status_highlights = {
+  current = "FzfPackCurrent",
+  update = "FzfPackUpdate",
+  rollback = "FzfPackRollback",
+  diverged = "FzfPackDiverged",
+  error = "FzfPackError",
+}
+
+local highlight_links = {
+  FzfPackCurrent = "DiagnosticOk",
+  FzfPackUpdate = "DiagnosticError",
+  FzfPackRollback = "DiagnosticWarn",
+  FzfPackDiverged = "DiagnosticWarn",
+  FzfPackError = "DiagnosticError",
+}
+
+local function initialize_highlights()
+  for name, target in pairs(highlight_links) do
+    vim.api.nvim_set_hl(0, name, { default = true, link = target })
+  end
+  if not highlight_autocmd then
+    local group = vim.api.nvim_create_augroup("FzfPackStatusHighlights", { clear = true })
+    vim.api.nvim_create_autocmd("ColorScheme", {
+      group = group,
+      callback = function()
+        for name, target in pairs(highlight_links) do
+          local current = vim.api.nvim_get_hl(0, { name = name, link = true })
+          if next(current) == nil or current.link == target then
+            vim.api.nvim_set_hl(0, name, { link = target })
+          end
+        end
+      end,
+    })
+    highlight_autocmd = true
+  end
+end
 
 local function clean(s)
   return tostring(s or "?"):gsub("[%c]", " ")
@@ -45,6 +83,8 @@ function M.open(rows, opts, checked)
   local ok, fzf = pcall(require, "fzf-lua")
   assert(ok, "fzf-pack could not load fzf-lua: " .. tostring(fzf))
   assert(type(fzf.fzf_exec) == "function", "fzf-pack requires fzf-lua.fzf_exec")
+  initialize_highlights()
+  local utils = require("fzf-lua.utils")
   local entries, by_id = {}, {}
   local preview_cache = {}
   local name_width = 12
@@ -52,7 +92,12 @@ function M.open(rows, opts, checked)
     name_width = math.max(name_width, math.min(24, vim.fn.strdisplaywidth(clean(row.plugin.spec.name))))
   end
   local function display(name, state, status)
-    return cell(name, name_width) .. "  " .. cell(state, 8) .. "  " .. clean(status)
+    local visible_status = clean(status)
+    local highlight = status_highlights[status]
+    if highlight then
+      visible_status = utils.ansi_from_hl(highlight, visible_status)
+    end
+    return cell(name, name_width) .. "  " .. cell(state, 8) .. "  " .. visible_status
   end
   for i, row in ipairs(rows) do
     local p = row.plugin
@@ -127,12 +172,21 @@ function M.open(rows, opts, checked)
     prompt = checked and "PackUpdate> " or "Pack> ",
     header = (checked and "Tab: select · Enter: review · Ctrl-A: all" or "Local refs · :PackUpdate to fetch")
       .. "\n\n"
-      .. display("PLUGIN", "STATE", "STATUS"),
+      .. cell("PLUGIN", name_width)
+      .. "  "
+      .. cell("STATE", 8)
+      .. "  STATUS",
     previewer = Preview,
     actions = actions,
     -- Matching fields refer to the transformed display, which has one field.
     -- Searching 2.. here would exclude the entire displayed plugin row.
-    fzf_opts = { ["--multi"] = true, ["--delimiter"] = "\t", ["--with-nth"] = "3..", ["--nth"] = "1.." },
+    fzf_opts = {
+      ["--ansi"] = true,
+      ["--multi"] = true,
+      ["--delimiter"] = "\t",
+      ["--with-nth"] = "3..",
+      ["--nth"] = "1..",
+    },
     winopts = {
       width = 0.95,
       height = 0.85,
