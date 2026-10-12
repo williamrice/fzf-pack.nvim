@@ -11,7 +11,21 @@ end
 -- Resuming on the main loop also makes API calls safe inside consumers.
 function M.run(work, done)
   local co = coroutine.create(work)
+  local cancelled, process = false, nil
+  local function cancel()
+    if cancelled then
+      return false
+    end
+    cancelled = true
+    if process then
+      pcall(process.kill, process, "sigterm")
+    end
+    return true
+  end
   local function resume(...)
+    if cancelled then
+      return
+    end
     local ok, request = coroutine.resume(co, ...)
     if not ok then
       done(nil, tostring(request))
@@ -22,18 +36,25 @@ function M.run(work, done)
       return
     end
     local args = vim.list_extend({ "git", "-c", "gc.auto=0" }, request.args)
-    local started, err = pcall(vim.system, args, options(request.path, request.timeout), function(out)
+    local started, result = pcall(vim.system, args, options(request.path, request.timeout), function(out)
       vim.schedule(function()
+        if cancelled then
+          return
+        end
+        process = nil
         resume(out)
       end)
     end)
-    if not started then
+    if started then
+      process = result
+    else
       vim.schedule(function()
-        resume({ code = -1, stderr = tostring(err) })
+        resume({ code = -1, stderr = tostring(result) })
       end)
     end
   end
   resume()
+  return cancel
 end
 
 function M.exec(path, args, timeout)

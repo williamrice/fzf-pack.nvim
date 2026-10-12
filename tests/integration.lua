@@ -417,6 +417,174 @@ local function run()
     "fetch recovers after timeout source is removed"
   )
 
+  -- Cancellation must release the run guard while a killed Git child still
+  -- holds inherited pipes, and its late callback must not disturb a new run.
+  require("fzf-pack.commands").register()
+  expect(vim.fn.exists(":PackCancel") == 2, "PackCancel command is registered")
+  expect(not check.cancel(), "idle cancel is safe")
+  local before_cancel_lock = pack.lock_bytes()
+  local before_cancel_topic_head = git(paths.topic, "rev-parse", "HEAD")
+  local before_cancel_branch_head = git(paths.branch, "rev-parse", "HEAD")
+  local old_transport_marker = tmp .. "/cancel-old-transport-started"
+  local new_transport_marker = tmp .. "/cancel-new-transport-started"
+  vim.fn.delete(old_transport_marker)
+  vim.fn.delete(new_transport_marker)
+  git(
+    paths.topic,
+    "config",
+    "remote.origin.uploadpack",
+    "printf started > " .. vim.fn.shellescape(old_transport_marker) .. "; sleep 4; git-upload-pack"
+  )
+  local original_system = vim.system
+  local old_process, old_callback_count, old_kill_count = nil, 0, 0
+  local queued_fetch_count = 0
+  vim.system = function(args, options, callback)
+    if not callback then
+      return original_system(args, options)
+    end
+    local old_fetch = callback and options.cwd == paths.topic and vim.tbl_contains(args, "fetch")
+    local queued_fetch = callback and options.cwd == paths.branch and vim.tbl_contains(args, "fetch")
+    local process = original_system(args, options, function(out)
+      if old_fetch then
+        old_callback_count = old_callback_count + 1
+      end
+      callback(out)
+    end)
+    if old_fetch then
+      old_process = process
+      local kill = process.kill
+      process.kill = function(self, signal)
+        old_kill_count = old_kill_count + 1
+        return kill(self, signal)
+      end
+    elseif queued_fetch then
+      queued_fetch_count = queued_fetch_count + 1
+    end
+    return process
+  end
+  local old_done_count, old_progress = 0, {}
+  expect(
+    check.start(
+      { topic_plugin, healthy_plugin },
+      { concurrency = 1, timeout = 15000, max_commits = 20 },
+      true,
+      function()
+        old_done_count = old_done_count + 1
+      end,
+      function(completed, count)
+        old_progress[#old_progress + 1] = { completed, count }
+      end
+    ),
+    "cancellable run starts"
+  )
+  expect(
+    vim.wait(5000, function()
+      return old_process ~= nil
+    end, 10),
+    "slow fetch process starts"
+  )
+  expect(
+    vim.wait(5000, function()
+      return vim.fn.filereadable(old_transport_marker) == 1
+    end, 10),
+    "old upload-pack child starts before cancellation"
+  )
+  vim.cmd.PackCancel()
+  expect(not check.running, "cancel immediately releases duplicate protection")
+  expect(old_kill_count == 1, "cancel signals the active Git process")
+  expect(old_callback_count == 0, "cancel returns before inherited pipes drain")
+  expect(queued_fetch_count == 0, "cancel prevents queued plugin work from starting")
+  expect(not check.cancel(), "repeated cancel is safe")
+  local old_progress_count = #old_progress
+  git(paths.topic, "config", "--unset", "remote.origin.uploadpack")
+  git(
+    paths.branch,
+    "config",
+    "remote.origin.uploadpack",
+    "printf started > " .. vim.fn.shellescape(new_transport_marker) .. "; sleep 8; git-upload-pack"
+  )
+  local new_done, new_done_count, new_progress = nil, 0, {}
+  expect(
+    check.start({ healthy_plugin }, { concurrency = 1, timeout = 15000, max_commits = 20 }, true, function(rows)
+      new_done, new_done_count = rows, new_done_count + 1
+    end, function(completed, count)
+      new_progress[#new_progress + 1] = { completed, count }
+    end),
+    "new run starts before canceled process pipes drain"
+  )
+  expect(
+    vim.wait(5000, function()
+      return vim.fn.filereadable(new_transport_marker) == 1
+    end, 10),
+    "replacement upload-pack child starts"
+  )
+  expect(check.running and queued_fetch_count == 1, "new run remains guarded while its fetch is active")
+  expect(
+    vim.wait(7000, function()
+      return old_callback_count > 0
+    end, 10),
+    "canceled process callback arrives after transport drains"
+  )
+  expect(check.running and new_done == nil, "old callback cannot release or complete the new run")
+  expect(
+    old_done_count == 0 and #old_progress == old_progress_count,
+    "canceled run emits no late completion or progress"
+  )
+  expect(
+    vim.wait(10000, function()
+      return new_done ~= nil
+    end, 10),
+    "new run completes after old callback"
+  )
+  expect(new_done_count == 1 and not check.running, "new run completes exactly once and releases guard")
+  expect(
+    #new_progress == 2
+      and new_progress[1][1] == 0
+      and new_progress[1][2] == 1
+      and new_progress[2][1] == 1
+      and new_progress[2][2] == 1,
+    "progress counts advance monotonically from zero through completion"
+  )
+  vim.system = original_system
+  git(paths.branch, "config", "--unset", "remote.origin.uploadpack")
+  expect(not check.cancel(), "cancel is safe after completion")
+  expect(
+    pack.lock_bytes() == before_cancel_lock
+      and git(paths.topic, "rev-parse", "HEAD") == before_cancel_topic_head
+      and git(paths.branch, "rev-parse", "HEAD") == before_cancel_branch_head,
+    "canceled and replacement checks preserve lock bytes and installed revisions"
+  )
+  local progress_error_done = false
+  expect(
+    check.start({ healthy_plugin }, { concurrency = 1, timeout = 10000, max_commits = 20 }, false, function()
+      progress_error_done = true
+    end, function()
+      error("expected progress callback failure")
+    end),
+    "progress callback failure check starts"
+  )
+  expect(
+    vim.wait(10000, function()
+      return progress_error_done
+    end, 10),
+    "progress callback failure does not strand completion"
+  )
+  expect(not check.running, "progress callback failure releases duplicate protection")
+  local done_error_called = false
+  expect(
+    check.start({ healthy_plugin }, { concurrency = 1, timeout = 10000, max_commits = 20 }, false, function()
+      done_error_called = true
+      error("expected completion callback failure")
+    end),
+    "completion callback failure check starts"
+  )
+  expect(
+    vim.wait(10000, function()
+      return done_error_called and not check.running
+    end, 10),
+    "completion callback failure leaves the check guard clear"
+  )
+
   -- New Neovim process: inactive specs restored from lock; no fetch or writes.
   vim.fn.rename(broken .. "-unavailable", broken)
   local child = vim
