@@ -40,11 +40,17 @@ Your `vim.pack.add()` calls must run before using the commands.
 | --- | --- |
 | `:Pack` | List installed plugins using local refs, without fetching |
 | `:PackUpdate` | Fetch updates asynchronously, then open the review picker |
+| `:PackCancel` | Cancel an active `:Pack` or `:PackUpdate` check |
 
 The list shows plugin name, active/inactive state, and update status. Move
 through the list to see full installed and target revisions, the configured
 branch/tag/commit or semver constraint, and commit history. Details appear on
 the right in wide windows and below the list in narrow windows.
+
+`:PackUpdate` reports completed and total plugin checks. `:PackCancel` stops
+queued work, signals active Git processes, and prevents canceled results from
+opening the picker. It does not cancel native confirmation or update handoff
+validation.
 
 In the update picker:
 
@@ -92,6 +98,10 @@ See `:help fzf-pack` and [examples/minimal.lua](examples/minimal.lua).
 - Changes made after the native confirmation opens cannot be checked again
   before vim.pack writes the lock, so external lock edits during that window
   may be overwritten by the native write.
+- `:PackCancel` signals the direct Git process with SIGTERM. A transport child
+  may keep inherited pipes open after Git exits; its late result is ignored,
+  and a new check can start while those pipes drain. Cancellation does not
+  guarantee termination of the whole transport process tree.
 - Concurrent external Git operations are not locked out.
 
 These are tracked in [GitHub issues](https://github.com/williamrice/fzf-pack.nvim/issues).

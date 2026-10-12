@@ -1,5 +1,6 @@
 local M = { running = false }
 local git = require("fzf-pack.git")
+local active_run
 
 local function lines(s)
   return s == "" and {} or vim.split(s, "\n")
@@ -53,41 +54,113 @@ function M.inspect(p, opts, fetch, row)
   return row
 end
 
-function M.start(plugins, opts, fetch, done)
+local function report_callback_error(kind, err)
+  vim.notify("fzf-pack: " .. kind .. " callback failed: " .. tostring(err), vim.log.levels.ERROR)
+end
+
+local function call_done(done, ...)
+  local ok, err = pcall(done, ...)
+  if not ok then
+    report_callback_error("completion", err)
+  end
+end
+
+function M.start(plugins, opts, fetch, done, progress)
   if M.running or require("fzf-pack.pack").confirm_open() then
     vim.notify("fzf-pack: A check or native confirmation is already open", vim.log.levels.WARN)
     return false
   end
   M.running = true
-  local rows, next_index, active, finished = {}, 1, 0, 0
-  local pump
-  pump = function()
-    if finished == #plugins then
-      M.running = false
-      done(rows)
+  local run = {
+    plugins = plugins,
+    rows = {},
+    handles = {},
+    next_index = 1,
+    active = 0,
+    finished = 0,
+  }
+  active_run = run
+  local function is_active()
+    return active_run == run
+  end
+  local function report_progress()
+    if not progress then
       return
     end
-    while active < opts.concurrency and next_index <= #plugins do
-      local index = next_index
-      next_index, active = next_index + 1, active + 1
+    local ok, err = pcall(progress, run.finished, #plugins)
+    if not ok then
+      report_callback_error("progress", err)
+    end
+  end
+  local function finish()
+    if not is_active() then
+      return
+    end
+    active_run = nil
+    M.running = false
+    call_done(done, run.rows)
+  end
+  local pump
+  pump = function()
+    if not is_active() then
+      return
+    end
+    if run.finished == #plugins then
+      finish()
+      return
+    end
+    while is_active() and run.active < opts.concurrency and run.next_index <= #plugins do
+      local index = run.next_index
+      run.next_index, run.active = run.next_index + 1, run.active + 1
       local p = plugins[index]
       local row = { plugin = p, status = "checking" }
-      rows[index] = row
-      git.run(function()
+      run.rows[index] = row
+      local callback_finished = false
+      local cancel_worker
+      cancel_worker = git.run(function()
         return M.inspect(p, opts, fetch, row)
       end, function(result, err)
+        callback_finished = true
+        run.handles[index] = nil
+        if not is_active() then
+          return
+        end
         if err then
           row.error, row.status = err, "error"
         else
-          rows[index] = result
+          run.rows[index] = result
         end
-        active, finished = active - 1, finished + 1
+        run.active, run.finished = run.active - 1, run.finished + 1
+        report_progress()
         pump()
       end)
+      if not callback_finished and is_active() then
+        run.handles[index] = cancel_worker
+      end
     end
+  end
+  report_progress()
+  if not is_active() then
+    return true
   end
   pump()
   return true
+end
+
+function M.cancel()
+  local run = active_run
+  if not run then
+    return false
+  end
+  active_run = nil
+  M.running = false
+  local completed, total = run.finished, #run.plugins
+  local handles = run.handles
+  run.handles = {}
+  for _, cancel_worker in pairs(handles) do
+    pcall(cancel_worker)
+  end
+  return true, completed, total
 end
 
 -- Verify that the reviewed target and installed HEAD still match the snapshot

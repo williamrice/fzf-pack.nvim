@@ -1,4 +1,5 @@
 :Pack	fzf-pack.txt	/*:Pack*
+:PackCancel	fzf-pack.txt	/*:PackCancel*
 :PackUpdate	fzf-pack.txt	/*:PackUpdate*
 fzf-pack	fzf-pack.txt	/*fzf-pack*
 fzf-pack-commands	fzf-pack.txt	/*fzf-pack-commands*

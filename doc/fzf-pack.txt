@@ -35,6 +35,12 @@ COMMANDS                                               *fzf-pack-commands*
     fetch failure does not prevent others from being reviewed. Simultaneous
     checks and checks during native confirmation are refused.
 
+*:PackCancel*
+    Cancel an active :Pack or :PackUpdate check. Queued work is stopped and
+    active Git processes receive SIGTERM. Canceled results do not open a picker.
+    This command does not cancel native confirmation or update handoff
+    validation. PackUpdate reports completed and total plugin checks.
+
 Rows form three aligned columns: name, active/inactive state, and status.
 Moving through rows updates the details pane, on the right in wide windows
 and below in narrow ones. It includes the branch/tag/commit or semver constraint,
@@ -86,6 +92,11 @@ The timeout applies per checking Git process, not to native acceptance/hooks.
 Interactive Git credential prompts are disabled during checking. Normal Git
 config and credential helpers apply. Submodules are handled on native acceptance,
 not recursively fetched by the checker.
+
+PackCancel signals the direct Git process; it does not guarantee termination of
+the entire transport process tree. A transport child may keep inherited pipes
+open after Git exits. Its late result is ignored, and a new check can start while
+those pipes drain.
 
 Future milestones: lock-file sync review, optional early startup synchronization
 (disabled by default), and inactive-plugin cleanup review. Not implemented yet.
