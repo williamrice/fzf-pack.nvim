@@ -13,7 +13,7 @@ Neovim’s built-in `vim.pack` manager and [fzf-lua](https://github.com/ibhagwan
 ## Requirements
 
 - Neovim 0.12+ (stable).
-- [fzf-lua](https://github.com/ibhagwan/fzf-lua) and its required `fzf` executable.
+- [fzf-lua](https://github.com/ibhagwan/fzf-lua) and `fzf` 0.71 or newer.
 - Git on your `PATH`.
 
 ## Installation
@@ -35,51 +35,60 @@ a dependency. fzf-pack.nvim manages plugins registered with `vim.pack`.
 
 ## Updating plugins
 
-1. Run `:PackUpdate` to check for updates.
-2. Move through the list to preview each plugin’s changes. Type to filter results.
-3. Press Tab to select plugins, then Enter to review them. Use Ctrl-A to review
-   all available changes, including results hidden by your filter.
-4. In the confirmation buffer, run `:w` to apply the changes or `:q` to cancel.
-5. Restart Neovim to load the updated plugins.
+Run `:FzfPack` to open the picker. It shows the last saved results immediately,
+or `not checked` when no usable cache is available. It checks for updates only
+when results are missing or at least an hour old by default. The header shows
+when plugins were last checked, such as `5 minutes ago` or `2 hours ago`. Checks fetch Git refs but never check out code or write the
+lock file. Nothing refreshes at startup.
 
-Checking for updates does not change installed plugin versions or the lock file.
-Updates use vim.pack’s confirmation flow and preserve its build hooks.
+Press Ctrl-R to force a refresh at any time; duplicate checks are ignored. Press Ctrl-X
+to stop queued checks while active workers finish, or Esc to close the picker
+and stop queued checks. Enter and Ctrl-A wait in the open picker while checks
+are running. Once complete, select plugins with Tab, then press Enter to review
+the selection or Ctrl-A to review all available updates, including filtered
+rows. Stale results cannot be selected for update.
+
+Marks stay selected when you filter or refresh. The header shows the selection
+count, including marked plugins hidden by the current filter.
+
+The confirmation buffer uses vim.pack’s native flow: `:w` applies updates and
+`:q` cancels. Native build hooks are preserved. Restart Neovim to load updated
+plugins.
 
 ### Commands
 
 | Command | Action |
 | --- | --- |
-| `:Pack` | Browse plugins using local information, without fetching |
-| `:PackUpdate` | Fetch updates and open the review picker |
-| `:PackCancel` | Stop an update check that is still running |
-
-`:PackCancel` also cancels a running local check. To cancel an update that has
-already reached the confirmation buffer, use `:q`.
+| `:FzfPack` | Open saved results and refresh when due |
 
 ### Picker keys
 
 | Key | Action |
 | --- | --- |
 | Tab / Shift-Tab | Mark or unmark plugins |
-| Enter | Review selected changes in `:PackUpdate` |
-| Ctrl-A | Review all available changes in `:PackUpdate` |
+| Ctrl-R | Force a refresh; duplicate checks are ignored |
+| Ctrl-X | Stop queued checks; active workers drain |
+| Enter | Review selected changes, or wait while checks run |
+| Ctrl-A | Review all available changes, or wait while checks run |
 | Ctrl-O | Open the focused plugin’s repository in your default browser |
-| Esc | Close the picker without applying changes |
+| Esc | Close the picker and stop queued checks |
 
-Ctrl-O works in both pickers and keeps your filter and selections intact.
+Ctrl-O keeps your filter and selections intact.
 It supports HTTP(S) sources and common SSH URLs for GitHub, GitLab, and Codeberg.
 Local paths, URLs containing credentials, and custom Git/SSH aliases or SSH ports
 show a notice instead.
 
 ### Reading the preview
 
-The preview shows installed and target revisions, version constraints, and
-incoming or removed commits. Pins, tags, branches, and version ranges are respected.
+The preview shows installed and target revisions, version constraints, the
+check time, and incoming or removed commits. Pins, tags, branches, and version
+ranges are respected. Recent saved results can be reviewed without fetching again. Installed and
+target revisions and the lock state are revalidated before confirmation.
+Expired results must be refreshed before updating.
 
 Current plugins appear in green and available updates in red, depending on your
-colorscheme. A `cached` status in `:Pack` reflects local information; run
-`:PackUpdate` to check the remote. If a check fails, its error appears in the
-preview and you can still review other plugins.
+colorscheme. If a check fails, its error appears in the preview while other
+plugins continue checking.
 
 Commits marked as breaking changes use bold red text and a `[BREAKING CHANGE]`
 label. This recognizes the Conventional Commits `!` marker and breaking-change
@@ -93,14 +102,21 @@ Setup is optional. These are the defaults:
 ```lua
 require('fzf-pack').setup({
   concurrency = 4,       -- plugins checked at the same time
+  refresh_interval = 3600, -- seconds between automatic checks on opening
   timeout = 30000,       -- timeout per Git command, in milliseconds
   max_commits = 200,     -- commits per incoming or removed history
   max_log_bytes = 65536, -- history size limit per side, in bytes
 })
 ```
 
-All options must be positive integers. The timeout applies to checks, not to
-applying updates or running build hooks.
+`refresh_interval` is in seconds: use `15 * 60` for 15 minutes, `2 * 60 * 60`
+for two hours, or `0` to check on every launch. It controls checks when opening
+the picker; leaving it open does not start periodic refreshes. Ctrl-R always
+forces a check.
+
+All options must be positive integers, except `refresh_interval`, which also
+accepts zero. `timeout` is the per-command Git timeout in milliseconds; it does
+not control refresh frequency or applying updates and build hooks.
 
 ### Colors
 
@@ -127,6 +143,9 @@ Reopen the picker after changing colorschemes to refresh its colors.
 
 ## Notes
 
+- The display-only cache is stored under `stdpath("state")`. Mismatched,
+  corrupt, or oversized cache data is ignored; if the cache is unavailable,
+  rows start as `not checked`.
 - Nothing is fetched or synchronized automatically at startup.
 - If you edit the lock file outside Neovim, restart Neovim before checking for
   updates. Resolve inconsistent plugin installations with `vim.pack` first.

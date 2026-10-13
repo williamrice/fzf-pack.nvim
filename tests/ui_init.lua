@@ -25,10 +25,15 @@ vim.fn.writefile({ "initial" }, path .. "/content")
 git("add", ".")
 git("commit", "-qm", "initial")
 vim.g.ui_old = git("rev-parse", "HEAD")
+vim.env.GIT_CONFIG_COUNT = "3"
+for index, name in ipairs({ "alpha", "beta", "pinned" }) do
+  vim.env["GIT_CONFIG_KEY_" .. (index - 1)] = "url." .. source .. ".insteadOf"
+  vim.env["GIT_CONFIG_VALUE_" .. (index - 1)] = "https://github.com/fixture/" .. name .. ".git"
+end
 vim.pack.add({
-  { src = source, name = "alpha", version = "main" },
-  { src = source, name = "beta", version = "main" },
-  { src = source, name = "pinned", version = vim.g.ui_old },
+  { src = "https://github.com/fixture/alpha.git", name = "alpha", version = "main" },
+  { src = "https://github.com/fixture/beta.git", name = "beta", version = "main" },
+  { src = "https://github.com/fixture/pinned.git", name = "pinned", version = vim.g.ui_old },
 }, { confirm = false, load = false })
 vim.fn.writefile({ "new" }, path .. "/content")
 git("add", ".")
@@ -54,9 +59,8 @@ vim.fn.writefile({
 git("commit", "-q", "-F", message_path)
 vim.g.ui_new = git("rev-parse", "HEAD")
 vim.g.ui_lock_before = require("fzf-pack.pack").lock_bytes()
-require("fzf-pack").setup({ max_log_bytes = 300 })
--- Give only the browser action synthetic web sources. Update review must keep
--- using the original local Git sources and snapshots.
+require("fzf-pack").setup({ max_log_bytes = 300, concurrency = 2, refresh_interval = 0 })
+-- Browser URLs are real-shaped; Git's fixture-only rewrite keeps checks local.
 local browser_calls = {}
 local browser_notices = {}
 local original_notify = vim.notify
@@ -74,23 +78,21 @@ vim.ui.open = function(url)
   end
   return {}
 end
-local check = require("fzf-pack.check")
-local original_review = check.review
-check.review = function(chosen, ...)
-  for _, row in ipairs(chosen) do
-    row.plugin.spec.src = source
+local system = vim.system
+local fetches = 0
+vim.system = function(args, options, callback)
+  if callback and vim.tbl_contains(args, "fetch") then
+    fetches = fetches + 1
+    local original_callback = callback
+    callback = function(result)
+      vim.defer_fn(function()
+        original_callback(result)
+      end, 1500)
+    end
   end
-  return original_review(chosen, ...)
+  return system(args, options, callback)
 end
-local picker = require("fzf-pack.picker")
-local open_picker = picker.open
-picker.open = function(rows, options, checked)
-  local browser_rows = vim.deepcopy(rows)
-  for _, row in ipairs(browser_rows) do
-    row.plugin.spec.src = "https://github.com/fixture/" .. row.plugin.spec.name .. ".git"
-  end
-  return open_picker(browser_rows, options, checked)
-end
+vim.fn.mkdir(vim.fn.stdpath("state"), "p")
 vim.g.ui_ready = true
 local timer = vim.uv.new_timer()
 local stopped = false
@@ -113,6 +115,11 @@ timer:start(
       return
     end
     if vim.fn.filereadable(test_tmp .. "/stop-observer") == 1 then
+      local check = require("fzf-pack.check")
+      if check.running then
+        check.stop()
+        return
+      end
       stop_observer()
       -- Quit from the editor callback: injected :qa! keys depend on UI mode.
       vim.cmd("qa!")
@@ -142,6 +149,8 @@ timer:start(
       screen = screen,
       attributes = attributes,
       browser_calls = browser_calls,
+      fetches = fetches,
+      refreshing = require("fzf-pack.check").running,
       browser_notices = browser_notices,
       commit_highlight = vim.api.nvim_get_hl(0, { name = "FzfPackCommit" }),
       breaking_highlight = vim.api.nvim_get_hl(0, { name = "FzfPackBreakingChange" }),

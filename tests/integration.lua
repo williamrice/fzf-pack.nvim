@@ -952,10 +952,61 @@ local function run()
     "fetch recovers after timeout source is removed"
   )
 
-  -- Cancellation must release the run guard while a killed Git child still
+  -- Picker cancellation drains active transports and never starts queued work.
+  local stop_marker = tmp .. "/stop-transport-started"
+  git(
+    paths.topic,
+    "config",
+    "remote.origin.uploadpack",
+    "printf started > " .. vim.fn.shellescape(stop_marker) .. "; sleep 1; git-upload-pack"
+  )
+  local stopped_rows, stopped_progress
+  local stop_opts = vim.tbl_extend("force", opts, { concurrency = 1 })
+  expect(
+    check.start({ topic_plugin, healthy_plugin }, stop_opts, true, function(rows)
+      stopped_rows = rows
+    end, function(completed, count, row, index)
+      if row then
+        stopped_progress = { completed, count, row, index }
+      end
+    end),
+    "draining run starts"
+  )
+  expect(
+    vim.wait(5000, function()
+      return vim.fn.filereadable(stop_marker) == 1
+    end, 10),
+    "transport starts before stop"
+  )
+  expect(check.stop() and check.running, "stop retains guard while active transport drains")
+  expect(not check.start({ healthy_plugin }, opts, true, function()
+    error("duplicate run")
+  end), "stop rejects overlapping work")
+  expect(
+    vim.wait(5000, function()
+      return stopped_rows ~= nil
+    end, 10),
+    "stopped run finishes after active work"
+  )
+  expect(not check.running and not check.stop(), "drained run releases guard exactly once")
+  expect(stopped_rows[1] and not stopped_rows[2], "stopped queue remains unstarted")
+  expect(
+    stopped_progress[1] == 1
+      and stopped_progress[2] == 2
+      and stopped_progress[3] == stopped_rows[1]
+      and stopped_progress[4] == 1,
+    "progress identifies the completed plugin row"
+  )
+  git(paths.topic, "config", "--unset", "remote.origin.uploadpack")
+
+  -- Low-level cancellation must release the run guard while a killed Git child still
   -- holds inherited pipes, and its late callback must not disturb a new run.
   require("fzf-pack.commands").register()
-  expect(vim.fn.exists(":PackCancel") == 2, "PackCancel command is registered")
+  expect(vim.fn.exists(":FzfPack") == 2, "FzfPack command is registered")
+  expect(
+    vim.fn.exists(":Pack") == 0 and vim.fn.exists(":PackUpdate") == 0 and vim.fn.exists(":PackCancel") == 0,
+    "legacy commands are not registered"
+  )
   expect(not check.cancel(), "idle cancel is safe")
   local before_cancel_lock = pack.lock_bytes()
   local before_cancel_topic_head = git(paths.topic, "rev-parse", "HEAD")
@@ -1024,7 +1075,7 @@ local function run()
     end, 10),
     "old upload-pack child starts before cancellation"
   )
-  vim.cmd.PackCancel()
+  check.cancel()
   expect(not check.running, "cancel immediately releases duplicate protection")
   expect(old_kill_count == 1, "cancel signals the active Git process")
   expect(old_callback_count == 0, "cancel returns before inherited pipes drain")

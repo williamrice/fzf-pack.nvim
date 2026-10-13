@@ -104,24 +104,74 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
     try:
         print("Starting Neovim PTY", flush=True)
         wait(lambda s: s.get("ready"))
-        send(b":Pack\r")
-        local = wait(lambda s: terminal(s) and "cached" in "\n".join(s.get("screen", [])))
+        send(b":FzfPack\r")
+        local = wait(lambda s: terminal(s) and "not checked" in "\n".join(s.get("screen", [])))
         assert "alpha" in "\n".join(local["screen"])
+        assert local["refreshing"] or local.get("fetches", 0) == 0
+        assert local.get("fetches", 0) <= 3
+        send(b"\t")
+        wait(lambda s: terminal(s) and "Selected: 1" in "\n".join(s.get("screen", [])))
         send(b"beta")
-        wait(lambda s: terminal(s) and "Pack> beta" in "\n".join(s.get("screen", []))
+        wait(lambda s: terminal(s) and "FzfPack> beta" in "\n".join(s.get("screen", []))
              and "beta (active)" in "\n".join(s.get("screen", [])))
+        send(b"\r")
+        blocked = wait(lambda s: terminal(s) and "Wait for checks" in "\n".join(s.get("screen", [])))
+        assert not blocked["confirmed"]
+        refreshed = wait(lambda s: terminal(s) and "Checked 3/3" in "\n".join(s.get("screen", []))
+                         and "(stale)" not in "\n".join(s.get("screen", []))
+                         and "+T*" not in "\n".join(s.get("screen", [])))
+        assert "FzfPack> beta" in "\n".join(refreshed["screen"])
+        assert "Selected: 1" in "\n".join(refreshed["screen"]), "\n".join(refreshed["screen"])
+        assert "beta (active)" in "\n".join(refreshed["screen"])
         send(b"\x0f")
         opened = wait(lambda s: terminal(s) and s.get("browser_calls") == ["https://github.com/fixture/beta"])
-        assert "Pack> beta" in "\n".join(opened["screen"]) and opened["unchanged"]
+        assert "FzfPack> beta" in "\n".join(opened["screen"]) and opened["unchanged"]
         send(b"\x15no-such-plugin")
         wait(lambda s: terminal(s) and "0/3" in "\n".join(s.get("screen", [])))
         send(b"\x0f")
         capture("local-picker")
+        send(b"\r")
+        hidden_review = wait(native)
+        hidden_text = "\n".join(hidden_review["lines"])
+        assert "## alpha" in hidden_text and "## beta" not in hidden_text, hidden_text
+        send(b":q\r")
+        assert wait(closed)["unchanged"]
+        send(b":lua require('fzf-pack').setup({ refresh_interval = 3600 })\r")
+        send(b":FzfPack\r")
+        recent = wait(lambda s: terminal(s) and "Last checked: just now" in "\n".join(s.get("screen", []))
+                      and "UI incoming body" in "\n".join(s.get("screen", [])))
+        assert recent["fetches"] == 3 and not recent["refreshing"]
+        assert "(stale)" not in "\n".join(recent["screen"])
+        send(b"\r")
+        recent_review = wait(native)
+        assert "## alpha" in "\n".join(recent_review["lines"]) and recent_review["fetches"] == 3
+        send(b":q\r")
+        assert wait(closed)["unchanged"]
+        send(b":FzfPack\r")
+        wait(lambda s: terminal(s) and "Last checked: just now" in "\n".join(s.get("screen", [])))
+        send(b"\x12")
+        forced = wait(lambda s: terminal(s) and "Checked 3/3" in "\n".join(s.get("screen", [])))
+        assert forced["fetches"] == 6, "Ctrl-R forces checks even with recent saved results"
+        send(b"\x1b")
+        wait(closed)
+        send(b":lua require('fzf-pack').setup({ refresh_interval = 0 })\r")
+        send(b":FzfPack\r")
+        cached = wait(lambda s: terminal(s) and "(stale)" in "\n".join(s.get("screen", []))
+                      and "Last checked:" in "\n".join(s.get("screen", [])))
+        assert "Last checked:" in "\n".join(cached["screen"])
+        active = wait(lambda s: terminal(s) and s.get("refreshing") and s.get("fetches", 0) == 8)
+        send(b"\x18")
+        wait(lambda s: terminal(s) and "Stopping; finishing active checks" in "\n".join(s.get("screen", [])))
+        send(b"\x12")
         send(b"\x1b")
         assert wait(closed)["unchanged"]
-        send(b":PackUpdate\r")
-        updated = wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", []))
-                       and "history truncated at 300 bytes" in "\n".join(s.get("screen", [])))
+        send(b":FzfPack\r")
+        waiting = wait(lambda s: terminal(s) and "Waiting for previous checks" in "\n".join(s.get("screen", [])))
+        assert waiting["fetches"] == active["fetches"], "reopening must not overlap active fetches"
+        updated = wait(lambda s: terminal(s) and "Checked 3/3" in "\n".join(s.get("screen", [])) and "UI incoming body" in "\n".join(s.get("screen", []))
+                       and "history truncated at 300 bytes" in "\n".join(s.get("screen", []))
+                       and "(stale)" not in "\n".join(s.get("screen", [])))
+        assert updated["fetches"] == 11, "cancelled queue must not start its third fetch"
         update_screen = "\n".join(updated["screen"])
         capture("update-picker")
         assert all(name in update_screen for name in ("alpha", "beta", "pinned", "UI incoming subject",
@@ -185,38 +235,52 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert "BREAKING CHANGE: UI API changes" in update_screen and "Migrate callers" in update_screen, update_screen
         before_tab = "\n".join(updated["screen"])
         send(b"\t")
-        marked = wait(lambda s: terminal(s) and "3/3 (1)" in "\n".join(s.get("screen", [])))
+        marked = wait(lambda s: terminal(s) and "Selected: 1" in "\n".join(s.get("screen", [])))
         marked_screen = "\n".join(marked["screen"])
         assert marked_screen != before_tab and "alpha" in marked_screen and "update" in marked_screen
         alpha_name_attribute, update_attribute = row_attributes(marked, "alpha", "update")
         assert update_attribute != alpha_name_attribute
         beta_name_attribute, update_attribute = row_attributes(marked, "beta", "update")
         assert update_attribute != beta_name_attribute
+        before_refresh = marked["fetches"]
+        send(b"\x12")
+        wait(lambda s: terminal(s) and s.get("refreshing") and s.get("fetches", 0) > before_refresh)
+        send(b"\x12\x12")
+        refreshed = wait(lambda s: terminal(s) and not s.get("refreshing")
+                         and "Checked 3/3" in "\n".join(s.get("screen", []))
+                         and "(stale)" not in "\n".join(s.get("screen", []))
+                         and "+T*" not in "\n".join(s.get("screen", [])))
+        assert refreshed["fetches"] == before_refresh + 3
+        assert "Selected: 1" in "\n".join(refreshed["screen"])
+        assert "beta (active)" in "\n".join(refreshed["screen"])
         send(b"\x0f")
         opened = wait(lambda s: terminal(s) and s.get("browser_calls") == [
             "https://github.com/fixture/beta", "https://github.com/fixture/beta"])
-        assert "3/3 (1)" in "\n".join(opened["screen"]) and opened["unchanged"]
+        assert "Selected: 1" in "\n".join(opened["screen"]) and opened["unchanged"]
         failure_flag = Path(tmp) / "browser-fails"
         failure_flag.touch()
         send(b"\x0f")
         failed_open = wait(lambda s: terminal(s) and len(s.get("browser_calls", [])) == 3
                            and bool(s.get("browser_notices")))
         assert "fixture has no browser opener" in failed_open["browser_notices"][-1]
-        assert "3/3 (1)" in "\n".join(failed_open["screen"]) and failed_open["unchanged"]
+        assert "Selected: 1" in "\n".join(failed_open["screen"]) and failed_open["unchanged"]
         failure_flag.unlink()
-        send(b"\t\r")
+        send(b"\t")
+        wait(lambda s: terminal(s) and "Selected: 2" in "\n".join(s.get("screen", [])))
+        send(b"\r")
         reviewed = wait(native)
         text = "\n".join(reviewed["lines"])
         assert "## alpha" in text and "## beta" in text and "## pinned" not in text, text
         assert reviewed["unchanged"]
         send(b":quit\r")
         assert wait(closed)["unchanged"]
-        send(b":PackUpdate\r")
+        send(b":FzfPack\r")
         wait(terminal)
         wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", []))
-             and "history truncated at 300 bytes" in "\n".join(s.get("screen", [])))
+             and "history truncated at 300 bytes" in "\n".join(s.get("screen", []))
+                       and "(stale)" not in "\n".join(s.get("screen", [])))
         send(b"alpha")
-        wait(lambda s: terminal(s) and "PackUpdate> alpha" in "\n".join(s.get("screen", []))
+        wait(lambda s: terminal(s) and "FzfPack> alpha" in "\n".join(s.get("screen", []))
              and "1/3" in "\n".join(s.get("screen", []))
              and "UI incoming body" in "\n".join(s.get("screen", [])))
         send(b"\x01")
@@ -225,8 +289,17 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert "## alpha" in text and "## beta" in text, text
         send(b":quit\r")
         assert wait(closed)["unchanged"]
-        send(b":PackUpdate\r")
+        send(b":FzfPack\r")
         wait(terminal)
+        send(b"no-such-plugin")
+        wait(lambda s: terminal(s) and s.get("refreshing") and "0/3" in "\n".join(s.get("screen", [])))
+        send(b"\x18")
+        stopped = wait(lambda s: terminal(s) and "Refresh cancelled" in "\n".join(s.get("screen", [])))
+        send(b"\x12")
+        wait(lambda s: terminal(s) and s.get("refreshing") and "Refreshing" in "\n".join(s.get("screen", [])))
+        empty_refresh = wait(lambda s: terminal(s) and "Checked 3/3" in "\n".join(s.get("screen", [])))
+        assert empty_refresh["fetches"] == stopped["fetches"] + 3
+        assert "FzfPack> no-such-plugin" in "\n".join(empty_refresh["screen"])
         send(b"\x1b")
         final = wait(closed)
         assert final["unchanged"]
@@ -239,7 +312,7 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
                        check=True, stdout=subprocess.DEVNULL)
         subprocess.run(["git", "-C", str(Path(tmp) / "upstream"), "update-ref",
                         "refs/heads/main", final["old"]], check=True, stdout=subprocess.DEVNULL)
-        send(b":PackUpdate\r")
+        send(b":FzfPack\r")
         removed = wait(lambda s: terminal(s)
                        and "Removed commits" in "\n".join(s.get("screen", []))
                        and "UI incoming body" in "\n".join(s.get("screen", []))
@@ -256,7 +329,7 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         capture("success")
         # Regression: teardown must also work while keys would go to fzf,
         # rather than to Neovim's command line.
-        send(b":Pack\r")
+        send(b":FzfPack\r")
         wait(terminal)
     except Exception:
         capture("failure")

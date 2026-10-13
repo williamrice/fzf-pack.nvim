@@ -5,4 +5,4 @@ vim.pack.add({
 })
 
 require("fzf-pack").setup({ concurrency = 4, timeout = 30000, max_commits = 200 })
--- :Pack for local information; :PackUpdate to fetch and review updates.
+-- Run :FzfPack to browse immediately; use Ctrl-R to refresh the check.

@@ -53,7 +53,7 @@ jobs:
         os: [ubuntu-24.04]
         fzf_lua:
           - name: current
-            ref: 48d7c3db291a2c7c1825905c227a6bc81c83b837
+            ref: 6995a3f8ba256a7a9949747ffbdf5a88eb8a3697
           - name: compat-0.7
             ref: 47b85a25c0c0b2c20b4e75199ed01bb71e7814f5
     runs-on: ${{ matrix.os }}

@@ -83,11 +83,11 @@ function M.start(plugins, opts, fetch, done, progress)
   local function is_active()
     return active_run == run
   end
-  local function report_progress()
+  local function report_progress(row, index)
     if not progress then
       return
     end
-    local ok, err = pcall(progress, run.finished, #plugins)
+    local ok, err = pcall(progress, run.finished, #plugins, row, index)
     if not ok then
       report_callback_error("progress", err)
     end
@@ -105,11 +105,11 @@ function M.start(plugins, opts, fetch, done, progress)
     if not is_active() then
       return
     end
-    if run.finished == #plugins then
+    if run.finished == #plugins or (run.stopping and run.active == 0) then
       finish()
       return
     end
-    while is_active() and run.active < opts.concurrency and run.next_index <= #plugins do
+    while is_active() and not run.stopping and run.active < opts.concurrency and run.next_index <= #plugins do
       local index = run.next_index
       run.next_index, run.active = run.next_index + 1, run.active + 1
       local p = plugins[index]
@@ -131,7 +131,7 @@ function M.start(plugins, opts, fetch, done, progress)
           run.rows[index] = result
         end
         run.active, run.finished = run.active - 1, run.finished + 1
-        report_progress()
+        report_progress(run.rows[index], index)
         pump()
       end)
       if not callback_finished and is_active() then
@@ -144,6 +144,16 @@ function M.start(plugins, opts, fetch, done, progress)
     return true
   end
   pump()
+  return true
+end
+
+-- Drain active Git processes before releasing the guard. Killing Git alone
+-- can leave transport children updating refs during a subsequent review.
+function M.stop()
+  if not active_run then
+    return false
+  end
+  active_run.stopping = true
   return true
 end
 
@@ -183,7 +193,7 @@ function M.review(rows, opts, done)
     git.run(function()
       local head = git.exec(row.plugin.path, { "rev-parse", "HEAD" }, opts.timeout)
       local target = M.resolve(row.plugin, opts)
-      assert(head == row.head and target == row.target, "Plugin changed since checking; run :PackUpdate again")
+      assert(head == row.head and target == row.target, "Plugin changed since checking; refresh with :FzfPack again")
       return true
     end, function(_, err)
       if err then
