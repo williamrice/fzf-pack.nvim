@@ -116,6 +116,12 @@ function M.preview(row)
   if row.error then
     text[#text + 1] = row.error
   end
+  if row.stale ~= nil then
+    text[#text + 1] = row.checked_at
+        and ("Last checked: %s%s"):format(os.date("%Y-%m-%d %H:%M:%S", row.checked_at), row.stale and " (stale)" or "")
+      or "Last checked: never"
+    text[#text + 1] = ""
+  end
   local prefix = table.concat(text, "\n"):gsub("\r", "")
   local log_text = row.log and #row.log > 0 and table.concat(row.log, "\n"):gsub("\r", "") or nil
   if log_text then
@@ -176,7 +182,7 @@ function M.preview(row)
   return lines, highlights
 end
 
-function M.open(rows, opts, checked)
+function M.open(rows, opts, checked, session)
   local ok, fzf = pcall(require, "fzf-lua")
   assert(ok, "fzf-pack could not load fzf-lua: " .. tostring(fzf))
   assert(type(fzf.fzf_exec) == "function", "fzf-pack requires fzf-lua.fzf_exec")
@@ -186,6 +192,9 @@ function M.open(rows, opts, checked)
   local utils = require("fzf-lua.utils")
   local entries, by_id = {}, {}
   local preview_cache = {}
+  local live = session and require("fzf-pack.live").new()
+  local identities, next_id = {}, 0
+  local marked = {}
   local name_width = 12
   for _, row in ipairs(rows) do
     name_width = math.max(name_width, math.min(24, vim.fn.strdisplaywidth(clean(row.plugin.spec.name))))
@@ -198,15 +207,27 @@ function M.open(rows, opts, checked)
     end
     return cell(name, name_width) .. "  " .. cell(state, 8) .. "  " .. visible_status
   end
-  for i, row in ipairs(rows) do
-    local p = row.plugin
-    entries[i] = table.concat({
-      tostring(i),
-      clean(p.spec.name),
-      display(p.spec.name, p.active and "active" or "inactive", row.status),
-    }, "\t")
-    by_id[i] = row
+  local function rebuild()
+    entries, by_id, preview_cache = {}, {}, {}
+    for i, row in ipairs(session and session.rows or rows) do
+      local p = row.plugin
+      local identity = p.path .. "\0" .. p.spec.name .. "\0" .. p.spec.src
+      if not identities[identity] then
+        next_id = next_id + 1
+        identities[identity] = next_id
+      end
+      local id = identities[identity]
+      local status = row.status .. (row.stale and row.checked_at and " (stale)" or "")
+      entries[i] = table.concat({
+        tostring(id),
+        clean(p.spec.name),
+        (session and (marked[id] and "✓ " or "  ") or "")
+          .. display(p.spec.name, p.active and "active" or "inactive", status),
+      }, "\t")
+      by_id[id] = row
+    end
   end
+  rebuild()
   local function find(entry)
     if type(entry) ~= "string" then
       return nil
@@ -249,25 +270,67 @@ function M.open(rows, opts, checked)
     self.win:update_preview_scrollbar()
   end
   local function review(selected, all)
+    if session and session.reviewing then
+      return
+    end
+    if session and (session.refreshing or session.waiting or require("fzf-pack.check").running) then
+      session.message = "Wait for checks to finish before reviewing updates"
+      session:publish()
+      return
+    end
     local chosen, seen = {}, {}
+    if session and not all and next(marked) then
+      selected = {}
+      for _, entry in ipairs(entries) do
+        if marked[tonumber(entry:match("^(%d+)"))] then
+          selected[#selected + 1] = entry
+        end
+      end
+    end
     for _, entry in ipairs(all and entries or selected) do
       local row = find(entry)
-      if row and row.target and row.head ~= row.target and not row.error and not seen[row] then
+      if row and row.target and row.head ~= row.target and not row.error and not row.stale and not seen[row] then
         chosen[#chosen + 1], seen[row] = row, true
       end
     end
     if #chosen == 0 then
-      vim.notify("fzf-pack: No available updates selected", vim.log.levels.INFO)
+      if session then
+        session.message = "No fresh updates selected; Ctrl-R to refresh"
+        session:publish()
+      else
+        vim.notify("fzf-pack: No available updates selected", vim.log.levels.INFO)
+      end
       return
     end
+    if session then
+      session.reviewing = true
+    end
     require("fzf-pack.check").review(chosen, opts, function(valid, err)
+      if session and not session.view then
+        session:resume_waiting()
+        return
+      end
       if not valid then
+        if session then
+          session.reviewing = false
+        end
         vim.notify("fzf-pack: " .. err, vim.log.levels.ERROR)
         return
       end
-      local success, failure = pcall(require("fzf-pack.pack").review, chosen)
-      if not success then
-        vim.notify("fzf-pack: " .. failure, vim.log.levels.ERROR)
+      local function confirm()
+        local success, failure = pcall(require("fzf-pack.pack").review, chosen)
+        if not success then
+          vim.notify("fzf-pack: " .. failure, vim.log.levels.ERROR)
+        end
+      end
+      if live then
+        if not session.view then
+          return
+        end
+        session.after_close = confirm
+        live:send("abort")
+      else
+        confirm()
       end
     end)
   end
@@ -292,29 +355,138 @@ function M.open(rows, opts, checked)
     field_index = "{}",
     desc = "Open repository",
   }
-  return fzf.fzf_exec(entries, {
-    prompt = checked and "PackUpdate> " or "Pack> ",
-    header = (checked and "Tab: select · Enter: review · Ctrl-A: all" or "Local refs · :PackUpdate to fetch")
-      .. " · Ctrl-O: open repo"
-      .. "\n\n"
-      .. cell("PLUGIN", name_width)
-      .. "  "
-      .. cell("STATE", 8)
-      .. "  STATUS",
+  local header = (checked and "Tab: select · Enter: review · Ctrl-A: all" or "Local refs")
+    .. " · Ctrl-O: open repo"
+    .. "\n\n"
+    .. cell("PLUGIN", name_width)
+    .. "  "
+    .. cell("STATE", 8)
+    .. "  STATUS"
+  local contents = entries
+  local keymap
+  if session then
+    local function live_header()
+      local count = 0
+      for id in pairs(marked) do
+        if by_id[id] then
+          count = count + 1
+        else
+          marked[id] = nil
+        end
+      end
+      return "Tab: mark · Enter: review · Ctrl-A: all\nCtrl-R: refresh · Ctrl-X: stop · Ctrl-O: repo\n"
+        .. clean(session.message or session:header())
+        .. " · Selected: "
+        .. count
+    end
+    header = live_header()
+    local reload = require("fzf-lua.shell").stringify_data(function()
+      return entries
+    end, {}, "")
+    contents = reload
+    session.view = {
+      update = function()
+        if session.reviewing then
+          return
+        end
+        live:send(function()
+          local previous = table.concat(entries, "\n")
+          rebuild()
+          local message = live_header()
+          -- Escape header text before inserting it into fzf action syntax.
+          message = message:gsub("[\r\027()\\]", " ")
+          return "change-header("
+            .. message
+            .. ")"
+            .. (previous ~= table.concat(entries, "\n") and ("+reload-sync(" .. reload .. ")") or "")
+            .. "+refresh-preview"
+        end)
+      end,
+    }
+    -- fzf restores only matching selections on reload. Own the marked IDs so
+    -- a refresh cannot drop selections hidden by the user's current query.
+    local toggle = require("fzf-lua.shell").stringify_data(function(selected)
+      local entry = selected and selected[1]
+      local id = entry and tonumber(entry:match("^(%d+)"))
+      if id and by_id[id] then
+        marked[id] = not marked[id] or nil
+        session:publish()
+      end
+    end, {}, "{}")
+    keymap = {
+      fzf = {
+        ["tab"] = "execute-silent(" .. toggle .. ")+down",
+        ["shift-tab"] = "execute-silent(" .. toggle .. ")+up",
+      },
+    }
+    actions.start = {
+      fn = function(args)
+        live:ready(args[1])
+        session:refresh()
+      end,
+      exec_silent = true,
+      field_index = '"$FZF_PORT"',
+    }
+    actions["ctrl-r"] = {
+      fn = function()
+        session:refresh()
+      end,
+      exec_silent = true,
+    }
+    actions["ctrl-x"] = {
+      fn = function()
+        session:stop()
+      end,
+      exec_silent = true,
+    }
+    actions.enter = {
+      fn = function(selected)
+        table.remove(selected, 1)
+        review(selected, false)
+      end,
+      exec_silent = true,
+      -- The query placeholder allows reviewing hidden marks with no matches.
+      field_index = "{q} {}",
+    }
+    actions["ctrl-a"] = {
+      fn = function(selected)
+        review(selected, true)
+      end,
+      exec_silent = true,
+      field_index = "{q}",
+    }
+  end
+  return fzf.fzf_exec(contents, {
+    prompt = "FzfPack> ",
+    no_resume = session and true or nil,
+    header = header,
     previewer = Preview,
     actions = actions,
+    keymap = keymap,
     -- Matching fields refer to the transformed display, which has one field.
     -- Searching 2.. here would exclude the entire displayed plugin row.
     fzf_opts = {
       ["--ansi"] = true,
-      ["--multi"] = true,
+      ["--multi"] = not session,
+      ["--no-multi"] = session and true or nil,
       ["--delimiter"] = "\t",
       ["--with-nth"] = "3..",
       ["--nth"] = "1..",
+      ["--listen"] = session and "127.0.0.1:0" or nil,
+      ["--id-nth"] = session and "1" or nil,
+      ["--track"] = session and true or nil,
     },
     winopts = {
       width = 0.95,
       height = 0.85,
+      on_close = session and function()
+        live:close()
+        session:close()
+        if session.after_close then
+          vim.schedule(session.after_close)
+          session.after_close = nil
+        end
+      end or nil,
       preview = { layout = "flex", flip_columns = 120, horizontal = "right:55%", vertical = "down:60%" },
     },
   })

@@ -78,13 +78,13 @@ function M.review(rows)
         row.plugin.spec.src == row.plugin.locked_src,
         "Source changed; use vim.pack directly to reconcile it first"
       )
-      assert(row.plugin.lock_bytes == M.lock_bytes(), "Lock file changed since checking; run :PackUpdate again")
+      assert(row.plugin.lock_bytes == M.lock_bytes(), "Lock file changed since checking; refresh with :FzfPack again")
       local fresh = current[row.plugin.spec.name]
       assert(
         fresh
           and fresh.spec.src == row.plugin.spec.src
           and tostring(fresh.spec.version) == tostring(row.plugin.spec.version),
-        "Plugin specification changed since checking; run :PackUpdate again"
+        "Plugin specification changed since checking; refresh with :FzfPack again"
       )
       names[#names + 1] = row.plugin.spec.name
     end

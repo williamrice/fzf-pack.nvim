@@ -10,6 +10,8 @@ the user's control. The supported reference runtime is Neovim 0.12.6.
 - `compat.lua`: capability checks and any version-specific compatibility handling.
 - `git.lua`: asynchronous process execution and Git environment handling.
 - `check.lua`: bounded checks, target resolution, stale-result validation.
+- `live.lua` / `session.lua`: live picker refresh lifecycle and check sessions.
+- `cache.lua`: bounded display-only result persistence.
 - `changelog.lua`: incoming and removed commit history.
 - `picker.lua`: fzf-lua rows, previews, and selection actions.
 - `commands.lua` / `init.lua`: commands and validated configuration.
@@ -21,7 +23,14 @@ target-resolution API exists. Test any change against native resolution.
 
 ## Behavioral requirements
 
-- `:Pack` performs no fetching. Checks must never checkout code or write locks.
+- `:FzfPack` is the sole command replacing `:Pack`, `:PackUpdate`, and
+  `:PackCancel`; do not add aliases. Open cached stale or `not checked` rows
+  immediately, then start bounded background checks after the picker opens.
+- Checks may fetch Git refs, but must never checkout code or write locks. Cache
+  data is display-only; stale rows never authorize updates.
+- Ctrl-R ignores duplicate refreshes. Ctrl-X stops queued checks while active
+  workers drain. Esc closes the picker and stops queued checks.
+- Keep Enter and Ctrl-A in the open picker with a wait message while checks run.
 - Selected updates go through native vim.pack confirmation: write accepts,
   quit cancels. Preserve native PackChangedPre/PackChanged build events.
 - Respect pins, tags, remote branches, and vim.version ranges.
@@ -30,7 +39,8 @@ target-resolution API exists. Test any change against native resolution.
 - Use fzf-lua, with hidden stable row identifiers and explicit custom previewer
   constructors. Do not treat plugin rows as file paths.
 - Never rewrite user configuration, generate setup code, or install tools at runtime.
-- Keep startup synchronization disabled until explicitly implemented and tested.
+- Persist display cache under `stdpath("state")`; treat missing, mismatched,
+  corrupt, or oversized data as a cache miss. Keep startup refresh disabled.
 
 ## Validation
 

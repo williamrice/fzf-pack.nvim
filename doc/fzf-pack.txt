@@ -10,11 +10,8 @@ CONTENTS                                                   *fzf-pack*
 ==============================================================================
 SETUP                                                     *fzf-pack-setup*
 
-Supported on Neovim 0.12.6. Other stable Neovim versions 0.12 or newer are
-best effort and produce a warning once per session. Prerelease/development
-builds, versions below 0.12, and versions without vim.pack.get(),
-vim.pack.update() or vim.system() are rejected. Build metadata alone does not
-make a stable version a prerelease. Requires fzf-lua, Git and fzf.
+The reference runtime is Neovim 0.12.6. Stable Neovim 0.12 or newer is
+best-effort. Requires fzf-lua, Git and fzf 0.71 or newer.
 Install through your existing plugin manager or add this checkout to
 'runtimepath'. Setup is optional. Initialize |vim.pack.add()| specifications
 before using the commands.
@@ -26,45 +23,44 @@ before using the commands.
     max_log_bytes = 65536, -- history bytes per plugin and side
   })
 <
-Options must be positive integers. There is no startup fetching or syncing.
+Options must be positive integers. Checks start after the picker opens; there
+is no startup fetching or syncing.
 Each incoming and removed history is captured up to max_log_bytes, independently
 of max_commits. The cap counts raw Git output bytes; section labels and visible
 truncation notices are not counted. History status is classified separately,
 so truncation does not change update, rollback, or diverged status.
-History is collected during checks; each row's formatted preview is cached on
-first display.
+The display-only result cache is stored under stdpath("state"). A cache miss,
+unavailable file, mismatched identity, corrupt data, or oversized data leaves a
+row as "not checked". Cached rows are always stale until a fresh check completes.
 
 ==============================================================================
 COMMANDS                                               *fzf-pack-commands*
 
-*:Pack*
-    Browse installed plugins. Uses local refs only, without fetching. Matching
-    results say "cached"; remote updates might exist. Enter simply closes.
+*:FzfPack*
+    Open the picker immediately with cached stale rows, or "not checked" rows
+    when no usable cache is available. Bounded background checks start after the
+    picker opens. A failed plugin check does not prevent other checks.
 
-*:PackUpdate*
-    Check updates asynchronously, then open an fzf-lua picker. One plugin's
-    fetch failure does not prevent others from being reviewed. Simultaneous
-    checks and checks during native confirmation are refused.
-
-*:PackCancel*
-    Cancel an active :Pack or :PackUpdate check. Queued work is stopped and
-    active Git processes receive SIGTERM. Canceled results do not open a picker.
-    This command does not cancel native confirmation or update handoff
-    validation. PackUpdate reports completed and total plugin checks.
+    Ctrl-R requests a refresh; duplicate work is ignored. Ctrl-X stops queued
+    checks while active workers drain. Esc closes the picker and stops queued
+    checks. Closing does not cancel active workers. Results are display data
+    only until fresh; stale rows cannot be selected for update.
 
 Rows form three aligned columns: name, active/inactive state, and status.
 Moving through rows updates the details pane, on the right in wide windows
 and below in narrow ones. It includes the branch/tag/commit or semver constraint,
 installed/target hashes, lock revision, source and path, plus incoming
-and removed commit subjects and bodies. Each side is capped by max_commits and
-max_log_bytes; oversized history shows a truncation notice.
-Status: current, cached (local only), update, rollback, diverged, or error.
+and removed commit subjects and bodies, and the last check time. Each side is
+capped by max_commits and max_log_bytes; oversized history shows a truncation
+notice.
+Status: not checked, current, update, rollback, diverged, or error. A stale
+marker means the row has not passed a fresh check in this session.
 Visible status text uses the FzfPackCurrent, FzfPackUpdate, FzfPackRollback,
 FzfPackDiverged, and FzfPackError highlight groups. Current defaults to green
 and update to red; rollback/diverged use the warning color and errors use red.
 They link to Neovim's diagnostic highlights, so the theme controls their colors.
-Reopen the picker after changing colorschemes to refresh colors; cached remains
-uncolored. For example, set a custom update color with:
+Reopen the picker after changing colorschemes to refresh colors. For example,
+set a custom update color with:
 
     :lua vim.api.nvim_set_hl(0, "FzfPackUpdate", { fg = "#ff0000" })
 
@@ -84,15 +80,20 @@ max_log_bytes with visible history and consumes a few bytes of that limit. A
 footer beyond the limit cannot be detected; the warning is informational and
 does not guarantee that omitted text contains no breaking change.
 
-Picker keys for :PackUpdate:
-    Tab / Shift-Tab    Select multiple results (standard fzf bindings).
-    Enter              Review selected available changes.
-    Ctrl-A             Review all available changes, even if filtered out.
+Picker keys:
+    Tab / Shift-Tab    Mark or unmark a plugin, then move down or up.
+    Enter              Review selected changes; while checks run, keep the
+                       picker open and show a wait message.
+    Ctrl-A             Review all available changes, including filtered rows;
+                       while checks run, keep the picker open and show a wait
+                       message.
     Ctrl-O             Open the focused repository in the default browser.
-    Esc                Close without applying changes.
+    Ctrl-R             Refresh; duplicate checks are ignored.
+    Ctrl-X             Stop queued checks; active workers drain.
+    Esc                Close the picker and stop queued checks.
 
-Ctrl-O works in both :Pack and :PackUpdate without closing the picker or changing
-its query or marked selections. It opens only the focused row. HTTP(S) sources
+Ctrl-O does not close the picker or change its query or marked selections. It
+opens only the focused row. HTTP(S) sources
 retain their host and port, with trailing slashes and .git removed from the path.
 Common git@host:path and ssh://git@host/path sources for GitHub, GitLab and
 Codeberg convert to HTTPS. Local paths, credential-bearing URLs, unresolved
@@ -114,11 +115,10 @@ lock-file bytes. The initial vim.pack call may install/repair plugins; fzf-pack
 refuses inconsistent disk/lock state and asks you to initialize vim.pack first.
 Changed source URLs are refused because native review can write those early.
 
-Version semantics follow the supported 0.12.6 runtime: default origin/HEAD,
-remote branches before same-named tags, tags/commits, and greatest matching
-strict semver tag using |vim.version.range()|. Pinned commits remain pinned.
-Installed HEAD is read from Git because vim.pack.get().rev is a locked revision
-in 0.12.6. The small read-only resolver is mirrored; no private pack API is used.
+The read-only resolver follows Neovim 0.12.6 ref selection: origin/HEAD,
+remote branches before same-named tags, and the greatest matching strict
+semver tag. Pins remain pinned. Installed HEAD is read from Git; no private
+vim.pack API is used.
 
 Before review, HEAD and target refs are revalidated. fzf-pack also compares each
 public vim.pack cached revision with the disk lock before checking and review.
@@ -138,15 +138,10 @@ Interactive Git credential prompts are disabled during checking. Normal Git
 config and credential helpers apply. Submodules are handled on native acceptance,
 not recursively fetched by the checker.
 
-PackCancel signals the direct Git process; it does not guarantee termination of
-the entire transport process tree. A transport child may keep inherited pipes
-open after Git exits. Its late result is ignored, and a new check can start while
-those pipes drain.
-
 Real-PTY CI is configured for Linux with supported Neovim 0.12.6 and
 fzf 0.74.5. macOS behavior is not verified by CI.
 It targets the current fzf-lua snapshot
-(48d7c3db291a2c7c1825905c227a6bc81c83b837) and an older 0.7 compatibility
+(6995a3f8ba256a7a9949747ffbdf5a88eb8a3697) and an older 0.7 compatibility
 snapshot (47b85a25c0c0b2c20b4e75199ed01bb71e7814f5). The older ref is additional
 compatibility coverage and does not change the Neovim support contract.
 
