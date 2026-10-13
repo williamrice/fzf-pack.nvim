@@ -76,4 +76,15 @@ function M.cached_revision(plugin)
   return plugin.rev
 end
 
+-- fzf-lua renamed its callback-to-shell helper after the 0.7 snapshot.
+function M.callback_command(fn, fields)
+  local shell = require("fzf-lua.shell")
+  if shell.stringify_data then
+    return shell.stringify_data(fn, {}, fields)
+  end
+  return shell.raw_action(function(...)
+    return fn(...) or {}
+  end, fields)
+end
+
 return M

@@ -272,6 +272,15 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert wait(closed)["unchanged"]
         send(b":FzfPack\r")
         wait(terminal)
+        send(b"no-such-plugin")
+        wait(lambda s: terminal(s) and s.get("refreshing") and "0/3" in "\n".join(s.get("screen", [])))
+        send(b"\x18")
+        stopped = wait(lambda s: terminal(s) and "Refresh cancelled" in "\n".join(s.get("screen", [])))
+        send(b"\x12")
+        wait(lambda s: terminal(s) and s.get("refreshing") and "Refreshing" in "\n".join(s.get("screen", [])))
+        empty_refresh = wait(lambda s: terminal(s) and "Checked 3/3" in "\n".join(s.get("screen", [])))
+        assert empty_refresh["fetches"] == stopped["fetches"] + 3
+        assert "FzfPack> no-such-plugin" in "\n".join(empty_refresh["screen"])
         send(b"\x1b")
         final = wait(closed)
         assert final["unchanged"]

@@ -380,9 +380,9 @@ function M.open(rows, opts, checked, session)
         .. count
     end
     header = live_header()
-    local reload = require("fzf-lua.shell").stringify_data(function()
+    local reload = require("fzf-pack.compat").callback_command(function()
       return entries
-    end, {}, "")
+    end, "")
     contents = reload
     session.view = {
       update = function()
@@ -405,14 +405,14 @@ function M.open(rows, opts, checked, session)
     }
     -- fzf restores only matching selections on reload. Own the marked IDs so
     -- a refresh cannot drop selections hidden by the user's current query.
-    local toggle = require("fzf-lua.shell").stringify_data(function(selected)
+    local toggle = require("fzf-pack.compat").callback_command(function(selected)
       local entry = selected and selected[1]
       local id = entry and tonumber(entry:match("^(%d+)"))
       if id and by_id[id] then
         marked[id] = not marked[id] or nil
         session:publish()
       end
-    end, {}, "{}")
+    end, "{}")
     keymap = {
       fzf = {
         ["tab"] = "execute-silent(" .. toggle .. ")+down",
@@ -432,12 +432,14 @@ function M.open(rows, opts, checked, session)
         session:refresh()
       end,
       exec_silent = true,
+      field_index = "{q}",
     }
     actions["ctrl-x"] = {
       fn = function()
         session:stop()
       end,
       exec_silent = true,
+      field_index = "{q}",
     }
     actions.enter = {
       fn = function(selected)
