@@ -24,10 +24,12 @@ target-resolution API exists. Test any change against native resolution.
 ## Behavioral requirements
 
 - `:FzfPack` is the sole command replacing `:Pack`, `:PackUpdate`, and
-  `:PackCancel`; do not add aliases. Open cached stale or `not checked` rows
-  immediately, then start bounded background checks after the picker opens.
+  `:PackCancel`; do not add aliases. Open cached or `not checked` rows immediately. Start bounded background checks
+  after opening only when any result is missing or expired (refresh_interval
+  seconds, default 3600; zero always checks). Ctrl-R bypasses the interval.
 - Checks may fetch Git refs, but must never checkout code or write locks. Cache
-  data is display-only; stale rows never authorize updates.
+  data never bypasses local HEAD, target, specification and lock validation;
+  expired rows require refresh before review.
 - Ctrl-R ignores duplicate refreshes. Ctrl-X stops queued checks while active
   workers drain. Esc closes the picker and stops queued checks.
 - Keep Enter and Ctrl-A in the open picker with a wait message while checks run.

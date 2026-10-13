@@ -18,30 +18,35 @@ before using the commands.
 >lua
   require('fzf-pack').setup({
     concurrency = 4,       -- maximum simultaneous plugin checks
+    refresh_interval = 3600, -- seconds between checks on opening; 0 = always
     timeout = 30000,       -- milliseconds per Git process
     max_commits = 200,     -- commits previewed per side of history
     max_log_bytes = 65536, -- history bytes per plugin and side
   })
 <
-Options must be positive integers. Checks start after the picker opens; there
-is no startup fetching or syncing.
+Options must be positive integers; refresh_interval also accepts zero.
+Automatic checks run on opening only when any result is missing or its age
+reaches refresh_interval seconds (default: 3600). Zero checks on every launch.
+Ctrl-R forces a check regardless of age. There is no periodic refresh while
+the picker stays open and no startup fetching or syncing.
 Each incoming and removed history is captured up to max_log_bytes, independently
 of max_commits. The cap counts raw Git output bytes; section labels and visible
 truncation notices are not counted. History status is classified separately,
 so truncation does not change update, rollback, or diverged status.
 The display-only result cache is stored under stdpath("state"). A cache miss,
 unavailable file, mismatched identity, corrupt data, or oversized data leaves a
-row as "not checked". Cached rows are always stale until a fresh check completes.
+row as "not checked". Recent results can be reviewed after local revision and
+lock validation; expired results require a refresh.
 
 ==============================================================================
 COMMANDS                                               *fzf-pack-commands*
 
 *:FzfPack*
-    Open the picker immediately with cached stale rows, or "not checked" rows
-    when no usable cache is available. Bounded background checks start after the
-    picker opens. A failed plugin check does not prevent other checks.
+    Open saved results immediately, or "not checked" rows when no usable cache
+    is available. If results are missing or expired, bounded background checks
+    start after the picker opens. The header shows the age of the oldest result. A failed plugin check does not prevent other checks.
 
-    Ctrl-R requests a refresh; duplicate work is ignored. Ctrl-X stops queued
+    Ctrl-R forces a refresh; duplicate work is ignored. Ctrl-X stops queued
     checks while active workers drain. Esc closes the picker and stops queued
     checks. Closing does not cancel active workers. Results are display data
     only until fresh; stale rows cannot be selected for update.
@@ -54,7 +59,7 @@ and removed commit subjects and bodies, and the last check time. Each side is
 capped by max_commits and max_log_bytes; oversized history shows a truncation
 notice.
 Status: not checked, current, update, rollback, diverged, or error. A stale
-marker means the row has not passed a fresh check in this session.
+marker means the saved result is expired or a refresh has not succeeded.
 Visible status text uses the FzfPackCurrent, FzfPackUpdate, FzfPackRollback,
 FzfPackDiverged, and FzfPackError highlight groups. Current defaults to green
 and update to red; rollback/diverged use the warning color and errors use red.

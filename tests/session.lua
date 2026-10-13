@@ -108,7 +108,7 @@ package.loaded["fzf-pack.picker"] = {
 }
 
 local session_module = require("fzf-pack.session")
-local opts = { concurrency = 2, timeout = 1000, max_commits = 20, max_log_bytes = 1024 }
+local opts = { concurrency = 2, timeout = 1000, max_commits = 20, max_log_bytes = 1024, refresh_interval = 0 }
 local first_view = session_module.open(opts)
 local first = opens[1].session
 assert(first_view == opens[1].view and opens[1].checked)
@@ -195,6 +195,56 @@ assert(second.view == nil and check.stops == 2)
 runs[4]:finish()
 assert(not check.running)
 
+local cached_opts = vim.tbl_extend("force", opts, { refresh_interval = 3600 })
+stored_rows = { make_row("update", fixed_time - 120) }
+session_module.open(cached_opts)
+local recent = session_module.current
+local before_recent = #runs
+recent:refresh(true)
+assert(#runs == before_recent, "recent saved results skip automatic checks")
+assert(not recent.rows[1].stale and recent:header():find("2 minutes ago", 1, true))
+recent:refresh()
+assert(#runs == before_recent + 1, "manual refresh ignores the interval")
+runs[#runs]:finish()
+recent:close()
+for _, timestamp in ipairs({ fixed_time - 3600, fixed_time + 60, 0 }) do
+  stored_rows = { make_row("update", timestamp) }
+  session_module.open(cached_opts)
+  local expired = session_module.current
+  local before = #runs
+  expired:refresh(true)
+  assert(#runs == before + 1, "expired, future, or missing successful checks refresh automatically")
+  runs[#runs]:finish()
+  expired:close()
+end
+assert(session_module.age(fixed_time - 7200) == "2 hours ago")
+assert(session_module.age(fixed_time - 172800) == "2 days ago")
+stored_rows = {}
+session_module.open(cached_opts)
+local missing = session_module.current
+local before_missing = #runs
+missing:refresh(true)
+assert(#runs == before_missing + 1, "missing cache checks regardless of interval")
+missing:close()
+session_module.open(cached_opts)
+local waiting_recent = session_module.current
+waiting_recent:refresh(true)
+runs[#runs]:report(1, 1, make_row("current", fixed_time), 1)
+runs[#runs]:finish()
+assert(
+  #runs == before_missing + 1 and not waiting_recent.waiting,
+  "reopening reuses results completed by the draining check rather than fetching again"
+)
+assert(not waiting_recent.rows[1].stale)
+waiting_recent:close()
+local config = require("fzf-pack")
+assert(config.options.refresh_interval == 3600)
+for _, invalid in ipairs({ -1, 0.5, math.huge, "3600" }) do
+  assert(not pcall(config.setup, { refresh_interval = invalid }), "invalid refresh interval rejected")
+end
+config.setup({ refresh_interval = 0 })
+assert(config.options.refresh_interval == 0)
+assert(not pcall(config.setup, { timeout = 0 }), "Git timeout remains positive")
 os.time = original_time
 print("PASS: session lifecycle")
 vim.cmd.qa({ bang = true })

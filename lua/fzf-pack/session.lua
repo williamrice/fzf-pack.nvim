@@ -2,6 +2,30 @@ local M = {}
 local check = require("fzf-pack.check")
 local cache = require("fzf-pack.cache")
 
+function M.age(timestamp)
+  if not timestamp then
+    return "never"
+  end
+  local seconds = math.max(0, os.time() - timestamp)
+  if seconds < 60 then
+    return "just now"
+  end
+  local count, unit
+  if seconds < 3600 then
+    count, unit = math.floor(seconds / 60), "minute"
+  elseif seconds < 86400 then
+    count, unit = math.floor(seconds / 3600), "hour"
+  else
+    count, unit = math.floor(seconds / 86400), "day"
+  end
+  return ("%d %s%s ago"):format(count, unit, count == 1 and "" or "s")
+end
+
+local function recent(row, opts)
+  local age = row.checked_at and (os.time() - row.checked_at)
+  return age ~= nil and age >= 0 and age < (opts.refresh_interval or 3600) and not row.error
+end
+
 function M.open(opts)
   if M.current and M.current.view then
     vim.notify("fzf-pack: FzfPack is already open", vim.log.levels.INFO)
@@ -15,6 +39,9 @@ function M.open(opts)
     return
   end
   local session = { rows = cache.load(plugins, opts), opts = opts, completed = 0, total = #plugins }
+  for _, row in ipairs(session.rows) do
+    row.stale = not recent(row, opts)
+  end
   M.current = session
   function session:publish()
     if self.view then
@@ -23,7 +50,7 @@ function M.open(opts)
   end
   function session:resume_waiting()
     if M.current ~= self and M.current and M.current.waiting and M.current.view then
-      M.current:refresh()
+      M.current:refresh(M.current.waiting_automatic)
     end
   end
   function session:header()
@@ -41,16 +68,24 @@ function M.open(opts)
       return "Refresh cancelled; Ctrl-R to retry"
     end
     if self.completed > 0 then
-      return ("Checked %d/%d · %s"):format(self.completed, self.total, os.date("%H:%M:%S", self.finished_at))
+      return ("Checked %d/%d · %s"):format(self.completed, self.total, M.age(self.finished_at))
     end
-    return "Last-known results · waiting to refresh"
+    local oldest
+    for _, row in ipairs(self.rows) do
+      if not row.checked_at then
+        return "Last checked: never"
+      end
+      oldest = math.min(oldest or row.checked_at, row.checked_at)
+    end
+    return "Last checked: " .. M.age(oldest)
   end
-  function session:refresh()
+  function session:refresh(automatic)
     if self.refreshing or self.reviewing then
       return
     end
     if check.running then
       self.waiting = true
+      self.waiting_automatic = automatic
       self:publish()
       return
     end
@@ -64,6 +99,18 @@ function M.open(opts)
       return
     end
     self.rows = cache.load(current_plugins, self.opts)
+    self.waiting = false
+    if automatic then
+      local fresh = #self.rows > 0
+      for _, row in ipairs(self.rows) do
+        row.stale = not recent(row, self.opts)
+        fresh = fresh and not row.stale
+      end
+      if fresh then
+        self:publish()
+        return
+      end
+    end
     self.completed, self.total = 0, #current_plugins
     self.refreshing, self.stopping, self.waiting, self.message = true, false, false, nil
     self:publish()

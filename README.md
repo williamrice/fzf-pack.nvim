@@ -36,11 +36,12 @@ a dependency. fzf-pack.nvim manages plugins registered with `vim.pack`.
 ## Updating plugins
 
 Run `:FzfPack` to open the picker. It shows the last saved results immediately,
-or `not checked` when no usable cache is available, then starts bounded
-background checks. Checks fetch Git refs but never check out code or write the
+or `not checked` when no usable cache is available. It checks for updates only
+when results are missing or at least an hour old by default. The header shows
+when plugins were last checked, such as `5 minutes ago` or `2 hours ago`. Checks fetch Git refs but never check out code or write the
 lock file. Nothing refreshes at startup.
 
-Press Ctrl-R to request a refresh; duplicate checks are ignored. Press Ctrl-X
+Press Ctrl-R to force a refresh at any time; duplicate checks are ignored. Press Ctrl-X
 to stop queued checks while active workers finish, or Esc to close the picker
 and stop queued checks. Enter and Ctrl-A wait in the open picker while checks
 are running. Once complete, select plugins with Tab, then press Enter to review
@@ -58,14 +59,14 @@ plugins.
 
 | Command | Action |
 | --- | --- |
-| `:FzfPack` | Open the plugin picker and check for updates in the background |
+| `:FzfPack` | Open saved results and refresh when due |
 
 ### Picker keys
 
 | Key | Action |
 | --- | --- |
 | Tab / Shift-Tab | Mark or unmark plugins |
-| Ctrl-R | Refresh; duplicate checks are ignored |
+| Ctrl-R | Force a refresh; duplicate checks are ignored |
 | Ctrl-X | Stop queued checks; active workers drain |
 | Enter | Review selected changes, or wait while checks run |
 | Ctrl-A | Review all available changes, or wait while checks run |
@@ -81,8 +82,9 @@ show a notice instead.
 
 The preview shows installed and target revisions, version constraints, the
 check time, and incoming or removed commits. Pins, tags, branches, and version
-ranges are respected. Cached results are display-only until a fresh check
-completes; stale rows cannot be updated.
+ranges are respected. Recent saved results can be reviewed without fetching again. Installed and
+target revisions and the lock state are revalidated before confirmation.
+Expired results must be refreshed before updating.
 
 Current plugins appear in green and available updates in red, depending on your
 colorscheme. If a check fails, its error appears in the preview while other
@@ -100,14 +102,21 @@ Setup is optional. These are the defaults:
 ```lua
 require('fzf-pack').setup({
   concurrency = 4,       -- plugins checked at the same time
+  refresh_interval = 3600, -- seconds between automatic checks on opening
   timeout = 30000,       -- timeout per Git command, in milliseconds
   max_commits = 200,     -- commits per incoming or removed history
   max_log_bytes = 65536, -- history size limit per side, in bytes
 })
 ```
 
-All options must be positive integers. The timeout applies to checks, not to
-applying updates or running build hooks.
+`refresh_interval` is in seconds: use `15 * 60` for 15 minutes, `2 * 60 * 60`
+for two hours, or `0` to check on every launch. It controls checks when opening
+the picker; leaving it open does not start periodic refreshes. Ctrl-R always
+forces a check.
+
+All options must be positive integers, except `refresh_interval`, which also
+accepts zero. `timeout` is the per-command Git timeout in milliseconds; it does
+not control refresh frequency or applying updates and build hooks.
 
 ### Colors
 

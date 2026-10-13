@@ -59,7 +59,7 @@ vim.fn.writefile({
 git("commit", "-q", "-F", message_path)
 vim.g.ui_new = git("rev-parse", "HEAD")
 vim.g.ui_lock_before = require("fzf-pack.pack").lock_bytes()
-require("fzf-pack").setup({ max_log_bytes = 300, concurrency = 2 })
+require("fzf-pack").setup({ max_log_bytes = 300, concurrency = 2, refresh_interval = 0 })
 -- Browser URLs are real-shaped; Git's fixture-only rewrite keeps checks local.
 local browser_calls = {}
 local browser_notices = {}

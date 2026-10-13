@@ -118,7 +118,11 @@ function M.preview(row)
   end
   if row.stale ~= nil then
     text[#text + 1] = row.checked_at
-        and ("Last checked: %s%s"):format(os.date("%Y-%m-%d %H:%M:%S", row.checked_at), row.stale and " (stale)" or "")
+        and ("Last checked: %s · %s%s"):format(
+          require("fzf-pack.session").age(row.checked_at),
+          os.date("%Y-%m-%d %H:%M:%S", row.checked_at),
+          row.stale and " (stale)" or ""
+        )
       or "Last checked: never"
     text[#text + 1] = ""
   end
@@ -422,7 +426,7 @@ function M.open(rows, opts, checked, session)
     actions.start = {
       fn = function(args)
         live:ready(args[1])
-        session:refresh()
+        session:refresh(true)
       end,
       exec_silent = true,
       field_index = '"$FZF_PORT"',

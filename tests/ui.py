@@ -136,11 +136,30 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert "## alpha" in hidden_text and "## beta" not in hidden_text, hidden_text
         send(b":q\r")
         assert wait(closed)["unchanged"]
+        send(b":lua require('fzf-pack').setup({ refresh_interval = 3600 })\r")
+        send(b":FzfPack\r")
+        recent = wait(lambda s: terminal(s) and "Last checked: just now" in "\n".join(s.get("screen", []))
+                      and "UI incoming body" in "\n".join(s.get("screen", [])))
+        assert recent["fetches"] == 3 and not recent["refreshing"]
+        assert "(stale)" not in "\n".join(recent["screen"])
+        send(b"\r")
+        recent_review = wait(native)
+        assert "## alpha" in "\n".join(recent_review["lines"]) and recent_review["fetches"] == 3
+        send(b":q\r")
+        assert wait(closed)["unchanged"]
+        send(b":FzfPack\r")
+        wait(lambda s: terminal(s) and "Last checked: just now" in "\n".join(s.get("screen", [])))
+        send(b"\x12")
+        forced = wait(lambda s: terminal(s) and "Checked 3/3" in "\n".join(s.get("screen", [])))
+        assert forced["fetches"] == 6, "Ctrl-R forces checks even with recent saved results"
+        send(b"\x1b")
+        wait(closed)
+        send(b":lua require('fzf-pack').setup({ refresh_interval = 0 })\r")
         send(b":FzfPack\r")
         cached = wait(lambda s: terminal(s) and "(stale)" in "\n".join(s.get("screen", []))
                       and "Last checked:" in "\n".join(s.get("screen", [])))
         assert "Last checked:" in "\n".join(cached["screen"])
-        active = wait(lambda s: terminal(s) and s.get("refreshing") and s.get("fetches", 0) == 5)
+        active = wait(lambda s: terminal(s) and s.get("refreshing") and s.get("fetches", 0) == 8)
         send(b"\x18")
         wait(lambda s: terminal(s) and "Stopping; finishing active checks" in "\n".join(s.get("screen", [])))
         send(b"\x12")
@@ -152,7 +171,7 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         updated = wait(lambda s: terminal(s) and "Checked 3/3" in "\n".join(s.get("screen", [])) and "UI incoming body" in "\n".join(s.get("screen", []))
                        and "history truncated at 300 bytes" in "\n".join(s.get("screen", []))
                        and "(stale)" not in "\n".join(s.get("screen", [])))
-        assert updated["fetches"] == 8, "cancelled queue must not start its third fetch"
+        assert updated["fetches"] == 11, "cancelled queue must not start its third fetch"
         update_screen = "\n".join(updated["screen"])
         capture("update-picker")
         assert all(name in update_screen for name in ("alpha", "beta", "pinned", "UI incoming subject",
