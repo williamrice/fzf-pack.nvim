@@ -229,6 +229,7 @@ missing:close()
 session_module.open(cached_opts)
 local waiting_recent = session_module.current
 waiting_recent:refresh(true)
+waiting_recent.message = "Wait for checks to finish before reviewing updates"
 runs[#runs]:report(1, 1, make_row("current", fixed_time), 1)
 runs[#runs]:finish()
 assert(
@@ -236,6 +237,7 @@ assert(
   "reopening reuses results completed by the draining check rather than fetching again"
 )
 assert(not waiting_recent.rows[1].stale)
+assert(waiting_recent.message == nil, "reused results clear the previous waiting notice")
 waiting_recent:close()
 local config = require("fzf-pack")
 assert(config.options.refresh_interval == 3600)

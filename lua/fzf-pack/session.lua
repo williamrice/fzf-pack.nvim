@@ -107,6 +107,7 @@ function M.open(opts)
         fresh = fresh and not row.stale
       end
       if fresh then
+        self.message = nil
         self:publish()
         return
       end
