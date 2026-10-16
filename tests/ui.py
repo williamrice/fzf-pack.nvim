@@ -101,6 +101,18 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
     terminal = lambda s: s.get("buftype") == "terminal"
     closed = lambda s: s.get("ready") and s.get("buftype") != "terminal" and not s.get("confirmed")
     native = lambda s: s.get("filetype") == "nvim-pack"
+
+    def filter_attribute(screen_state, mode):
+        label = f"[ Filter: {mode} ]"
+        for row, line in enumerate(screen_state["screen"]):
+            if label in line:
+                assert "Tab:" not in line and "Ctrl-R:" not in line, line
+                badge = screen_state["attributes"][row][line.index(label)]
+                hint = screen_state["attributes"][row][line.index("Alt-U:")]
+                assert badge != hint, "Filter badge should stand out from its shortcut hint"
+                return badge
+        raise AssertionError(f"Missing filter badge: {label}")
+
     try:
         print("Starting Neovim PTY", flush=True)
         wait(lambda s: s.get("ready"))
@@ -109,6 +121,15 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert "alpha" in "\n".join(local["screen"])
         assert local["refreshing"] or local.get("fetches", 0) == 0
         assert local.get("fetches", 0) <= 3
+        all_filter_attribute = filter_attribute(local, "All")
+        send(b"\x1bu")
+        outdated = wait(lambda s: terminal(s) and "Filter: Outdated" in "\n".join(s.get("screen", []))
+             and "0/0" in "\n".join(s.get("screen", [])))
+        assert filter_attribute(outdated, "Outdated") != all_filter_attribute
+        send(b"\x1bu")
+        all_mode = wait(lambda s: terminal(s) and "Filter: All" in "\n".join(s.get("screen", []))
+             and "3/3" in "\n".join(s.get("screen", [])))
+        assert filter_attribute(all_mode, "All") == all_filter_attribute
         send(b"\t")
         wait(lambda s: terminal(s) and "Selected: 1" in "\n".join(s.get("screen", [])))
         send(b"beta")
@@ -123,6 +144,20 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert "FzfPack> beta" in "\n".join(refreshed["screen"])
         assert "Selected: 1" in "\n".join(refreshed["screen"]), "\n".join(refreshed["screen"])
         assert "beta (active)" in "\n".join(refreshed["screen"])
+        send(b"\x1bu")
+        filtered = wait(lambda s: terminal(s) and "Filter: Outdated" in "\n".join(s.get("screen", []))
+                        and "1/2" in "\n".join(s.get("screen", [])))
+        assert "FzfPack> beta" in "\n".join(filtered["screen"])
+        assert "Selected: 1" in "\n".join(filtered["screen"]) and filtered["fetches"] == 3
+        send(b"\x15pinned")
+        wait(lambda s: terminal(s) and "0/2" in "\n".join(s.get("screen", [])))
+        send(b"\x1bu")
+        restored = wait(lambda s: terminal(s) and "Filter: All" in "\n".join(s.get("screen", []))
+                        and "1/3" in "\n".join(s.get("screen", [])))
+        assert "FzfPack> pinned" in "\n".join(restored["screen"])
+        assert "Selected: 1" in "\n".join(restored["screen"])
+        send(b"\x15beta")
+        wait(lambda s: terminal(s) and "beta (active)" in "\n".join(s.get("screen", [])))
         send(b"\x0f")
         opened = wait(lambda s: terminal(s) and s.get("browser_calls") == ["https://github.com/fixture/beta"])
         assert "FzfPack> beta" in "\n".join(opened["screen"]) and opened["unchanged"]
@@ -141,14 +176,24 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         recent = wait(lambda s: terminal(s) and "Last checked: just now" in "\n".join(s.get("screen", []))
                       and "UI incoming body" in "\n".join(s.get("screen", [])))
         assert recent["fetches"] == 3 and not recent["refreshing"]
+        assert "Filter: All" in "\n".join(recent["screen"])
         assert "(stale)" not in "\n".join(recent["screen"])
+        send(b"\x1bu")
+        wait(lambda s: terminal(s) and "Filter: Outdated" in "\n".join(s.get("screen", []))
+             and "2/2" in "\n".join(s.get("screen", [])))
         send(b"\r")
         recent_review = wait(native)
         assert "## alpha" in "\n".join(recent_review["lines"]) and recent_review["fetches"] == 3
         send(b":q\r")
         assert wait(closed)["unchanged"]
         send(b":FzfPack\r")
-        wait(lambda s: terminal(s) and "Last checked: just now" in "\n".join(s.get("screen", [])))
+        remembered = wait(lambda s: terminal(s) and "Last checked: just now" in "\n".join(s.get("screen", []))
+                          and "Filter: Outdated" in "\n".join(s.get("screen", []))
+                          and "2/2" in "\n".join(s.get("screen", [])))
+        assert remembered["fetches"] == 3
+        send(b"\x1bu")
+        wait(lambda s: terminal(s) and "Filter: All" in "\n".join(s.get("screen", []))
+             and "3/3" in "\n".join(s.get("screen", [])))
         send(b"\x12")
         forced = wait(lambda s: terminal(s) and "Checked 3/3" in "\n".join(s.get("screen", [])))
         assert forced["fetches"] == 6, "Ctrl-R forces checks even with recent saved results"
@@ -243,6 +288,9 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         beta_name_attribute, update_attribute = row_attributes(marked, "beta", "update")
         assert update_attribute != beta_name_attribute
         before_refresh = marked["fetches"]
+        send(b"\x1bu")
+        wait(lambda s: terminal(s) and "Filter: Outdated" in "\n".join(s.get("screen", []))
+             and "2/2" in "\n".join(s.get("screen", [])))
         send(b"\x12")
         wait(lambda s: terminal(s) and s.get("refreshing") and s.get("fetches", 0) > before_refresh)
         send(b"\x12\x12")
@@ -251,6 +299,8 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
                          and "(stale)" not in "\n".join(s.get("screen", []))
                          and "+T*" not in "\n".join(s.get("screen", [])))
         assert refreshed["fetches"] == before_refresh + 3
+        assert "Filter: Outdated" in "\n".join(refreshed["screen"])
+        assert "2/2" in "\n".join(refreshed["screen"])
         assert "Selected: 1" in "\n".join(refreshed["screen"])
         assert "beta (active)" in "\n".join(refreshed["screen"])
         send(b"\x0f")
@@ -275,6 +325,9 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         send(b":quit\r")
         assert wait(closed)["unchanged"]
         send(b":FzfPack\r")
+        wait(lambda s: terminal(s) and "Filter: Outdated" in "\n".join(s.get("screen", [])))
+        send(b"\x1bu")
+        wait(lambda s: terminal(s) and "Filter: All" in "\n".join(s.get("screen", [])))
         wait(terminal)
         wait(lambda s: terminal(s) and "UI incoming body" in "\n".join(s.get("screen", []))
              and "history truncated at 300 bytes" in "\n".join(s.get("screen", []))
@@ -322,6 +375,14 @@ with FixtureDirectory(prefix="fzf-pack-ui-", dir="/tmp") as tmp:
         assert_commit_rendered(removed, "UI incoming subject", "UI incoming body", "breaking_highlight")
         assert_commit_rendered(removed, "UI normal subject", "UI normal body", "commit_highlight")
         capture("removed-picker")
+        wait(lambda s: terminal(s) and not s.get("refreshing")
+             and "Checked 3/3" in "\n".join(s.get("screen", [])))
+        send(b"\x1bu")
+        wait(lambda s: terminal(s) and "Filter: Outdated" in "\n".join(s.get("screen", []))
+             and "0/0" in "\n".join(s.get("screen", [])))
+        send(b"\x1bu")
+        wait(lambda s: terminal(s) and "Filter: All" in "\n".join(s.get("screen", []))
+             and "3/3" in "\n".join(s.get("screen", [])))
         send(b"\x1b")
         assert wait(closed)["unchanged"]
         artifact = Path(tempfile.gettempdir()) / "fzf-pack-picker-screen.txt"

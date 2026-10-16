@@ -6,6 +6,7 @@ vim.opt.termguicolors = true
 vim.api.nvim_set_hl(0, "DiagnosticOk", { fg = "#11aa22" })
 vim.api.nvim_set_hl(0, "DiagnosticError", { fg = "#dd2233" })
 vim.api.nvim_set_hl(0, "DiagnosticWarn", { fg = "#eeaa00" })
+vim.api.nvim_set_hl(0, "DiagnosticInfo", { fg = "#3388ee" })
 vim.api.nvim_set_hl(0, "Identifier", { fg = "#2468ac", ctermfg = 25 })
 local test_tmp = assert(vim.env.FZF_PACK_TEST_TMP)
 local path = test_tmp .. "/upstream"
