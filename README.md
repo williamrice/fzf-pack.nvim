@@ -51,6 +51,18 @@ rows. Stale results cannot be selected for update.
 Marks stay selected when you filter or refresh. The header shows the selection
 count, including marked plugins hidden by the current filter.
 
+Press Alt-U to switch between all plugins and outdated plugins. Outdated mode
+shows `update` and `diverged` rows with incoming changes; current, unchecked,
+failed, and rollback-only rows are hidden. Stale results retain their warning
+and still require refresh before review. Search text and marks are preserved;
+Ctrl-A continues to review all eligible changes, including hidden rows.
+The header gives the current filter a bold, color-coded badge: `Filter: All`
+uses `FzfPackFilterAll` (DiagnosticInfo by default), and `Filter: Outdated`
+uses `FzfPackFilterOutdated` (DiagnosticWarn by default). The theme controls
+their colors. `Alt-U: toggle` sits beside the badge. The filter choice is
+remembered for later picker sessions until Neovim exits; it is kept in memory
+and is not written to disk. Toggling it does not start a check.
+
 The confirmation buffer uses vim.pack’s native flow: `:w` applies updates and
 `:q` cancels. Native build hooks are preserved. Restart Neovim to load updated
 plugins.
@@ -71,6 +83,7 @@ plugins.
 | Enter | Review selected changes, or wait while checks run |
 | Ctrl-A | Review all available changes, or wait while checks run |
 | Ctrl-O | Open the focused plugin’s repository in your default browser |
+| Alt-U | Toggle between all plugins and outdated plugins |
 | Esc | Close the picker and stop queued checks |
 
 Ctrl-O keeps your filter and selections intact.

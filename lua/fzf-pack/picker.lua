@@ -1,5 +1,6 @@
 local M = {}
 local highlight_autocmd = false
+local remembered_outdated_only = false
 local commit_highlight_namespace
 local generated_commit_highlight
 
@@ -17,6 +18,8 @@ local highlight_links = {
   FzfPackRollback = "DiagnosticWarn",
   FzfPackDiverged = "DiagnosticWarn",
   FzfPackError = "DiagnosticError",
+  FzfPackFilterAll = "DiagnosticInfo",
+  FzfPackFilterOutdated = "DiagnosticWarn",
 }
 
 local function commit_highlight()
@@ -194,11 +197,12 @@ function M.open(rows, opts, checked, session)
   initialize_breaking_highlight()
   commit_highlight_namespace = commit_highlight_namespace or vim.api.nvim_create_namespace("fzf-pack-commit-headers")
   local utils = require("fzf-lua.utils")
-  local entries, by_id = {}, {}
+  local entries, all_entries, by_id = {}, {}, {}
   local preview_cache = {}
   local live = session and require("fzf-pack.live").new()
   local identities, next_id = {}, 0
   local marked = {}
+  local outdated_only = session and remembered_outdated_only or false
   local name_width = 12
   for _, row in ipairs(rows) do
     name_width = math.max(name_width, math.min(24, vim.fn.strdisplaywidth(clean(row.plugin.spec.name))))
@@ -212,8 +216,8 @@ function M.open(rows, opts, checked, session)
     return cell(name, name_width) .. "  " .. cell(state, 8) .. "  " .. visible_status
   end
   local function rebuild()
-    entries, by_id, preview_cache = {}, {}, {}
-    for i, row in ipairs(session and session.rows or rows) do
+    entries, all_entries, by_id, preview_cache = {}, {}, {}, {}
+    for _, row in ipairs(session and session.rows or rows) do
       local p = row.plugin
       local identity = p.path .. "\0" .. p.spec.name .. "\0" .. p.spec.src
       if not identities[identity] then
@@ -222,13 +226,22 @@ function M.open(rows, opts, checked, session)
       end
       local id = identities[identity]
       local status = row.status .. (row.stale and row.checked_at and " (stale)" or "")
-      entries[i] = table.concat({
+      local entry = table.concat({
         tostring(id),
         clean(p.spec.name),
         (session and (marked[id] and "✓ " or "  ") or "")
           .. display(p.spec.name, p.active and "active" or "inactive", status),
       }, "\t")
       by_id[id] = row
+      all_entries[#all_entries + 1] = entry
+      local outdated = (row.status == "update" or row.status == "diverged")
+        and row.head
+        and row.target
+        and row.head ~= row.target
+        and not row.error
+      if not outdated_only or outdated then
+        entries[#entries + 1] = entry
+      end
     end
   end
   rebuild()
@@ -285,13 +298,13 @@ function M.open(rows, opts, checked, session)
     local chosen, seen = {}, {}
     if session and not all and next(marked) then
       selected = {}
-      for _, entry in ipairs(entries) do
+      for _, entry in ipairs(all_entries) do
         if marked[tonumber(entry:match("^(%d+)"))] then
           selected[#selected + 1] = entry
         end
       end
     end
-    for _, entry in ipairs(all and entries or selected) do
+    for _, entry in ipairs(all and all_entries or selected) do
       local row = find(entry)
       if row and row.target and row.head ~= row.target and not row.error and not row.stale and not seen[row] then
         chosen[#chosen + 1], seen[row] = row, true
@@ -378,10 +391,16 @@ function M.open(rows, opts, checked, session)
           marked[id] = nil
         end
       end
-      return "Tab: mark · Enter: review · Ctrl-A: all\nCtrl-R: refresh · Ctrl-X: stop · Ctrl-O: repo\n"
+      local filter = outdated_only and "Outdated" or "All"
+      local filter_group = outdated_only and "FzfPackFilterOutdated" or "FzfPackFilterAll"
+      local badge = utils.ansi_from_hl(filter_group, "[ Filter: " .. filter .. " ]")
+      return "\027[1m"
+        .. badge
+        .. "\027[0m  Alt-U: toggle\n"
         .. clean(session.message or session:header())
         .. " · Selected: "
         .. count
+        .. "\n\nTab: mark · Enter: review · Ctrl-A: all\nCtrl-R: refresh · Ctrl-X: stop · Ctrl-O: repo · Esc: close"
     end
     header = live_header()
     local reload = require("fzf-pack.compat").callback_command(function()
@@ -397,15 +416,26 @@ function M.open(rows, opts, checked, session)
           local previous = table.concat(entries, "\n")
           rebuild()
           local message = live_header()
-          -- Escape header text before inserting it into fzf action syntax.
-          message = message:gsub("[\r\027()\\]", " ")
+          local rows_changed = previous ~= table.concat(entries, "\n")
+          -- Dynamic text is sanitized before ANSI styling; keep the badge's
+          -- color escapes intact while escaping fzf action delimiters.
+          message = message:gsub("[\r()\\]", " ")
           return "change-header("
             .. message
             .. ")"
-            .. (previous ~= table.concat(entries, "\n") and ("+reload-sync(" .. reload .. ")") or "")
+            .. (rows_changed and ("+reload-sync(" .. reload .. ")") or "")
             .. "+refresh-preview"
         end)
       end,
+    }
+    actions["alt-u"] = {
+      fn = function()
+        outdated_only = not outdated_only
+        remembered_outdated_only = outdated_only
+        session:publish()
+      end,
+      exec_silent = true,
+      field_index = "{q}",
     }
     -- fzf restores only matching selections on reload. Own the marked IDs so
     -- a refresh cannot drop selections hidden by the user's current query.

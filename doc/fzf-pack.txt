@@ -51,6 +51,18 @@ COMMANDS                                               *fzf-pack-commands*
     checks. Closing does not cancel active workers. Results are display data
     only until fresh; stale rows cannot be selected for update.
 
+    Alt-U toggles between all plugins and outdated plugins. Outdated mode shows
+    update and diverged rows with incoming changes. Current, unchecked, failed,
+    and rollback-only rows are hidden. Stale results retain their warning and
+    require refresh before review. Search text and marked selections survive
+    toggling, including marks hidden by the filter. The
+    header shows a bold, color-coded Filter: All or Filter: Outdated badge,
+    with Alt-U: toggle beside it. FzfPackFilterAll links to DiagnosticInfo and
+    FzfPackFilterOutdated links to DiagnosticWarn, so the colors follow the
+    active theme. The filter choice carries across picker sessions until
+    Neovim exits. It stays in memory and is not written to disk. Changing it
+    does not start a check.
+
 Rows form three aligned columns: name, active/inactive state, and status.
 Moving through rows updates the details pane, on the right in wide windows
 and below in narrow ones. It includes the branch/tag/commit or semver constraint,
@@ -68,6 +80,10 @@ Reopen the picker after changing colorschemes to refresh colors. For example,
 set a custom update color with:
 
     :lua vim.api.nvim_set_hl(0, "FzfPackUpdate", { fg = "#ff0000" })
+
+The live picker filter badge uses FzfPackFilterAll and
+FzfPackFilterOutdated. They link to DiagnosticInfo and DiagnosticWarn,
+respectively; define either group to choose custom colors.
 
 Commit headers in incoming and removed history use the bold FzfPackCommit
 highlight, whose default foreground follows Identifier. Conventional Commits
@@ -93,6 +109,7 @@ Picker keys:
                        while checks run, keep the picker open and show a wait
                        message.
     Ctrl-O             Open the focused repository in the default browser.
+    Alt-U              Toggle all/outdated plugins; preserve query and marks.
     Ctrl-R             Refresh; duplicate checks are ignored.
     Ctrl-X             Stop queued checks; active workers drain.
     Esc                Close the picker and stop queued checks.

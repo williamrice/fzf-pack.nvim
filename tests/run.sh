@@ -13,4 +13,5 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 mkdir -p "$XDG_CONFIG_HOME/nvim"
 nvim --headless -u NONE -i NONE -l "$root/tests/cache.lua"
 nvim --headless -u NONE -i NONE -l "$root/tests/session.lua"
+nvim --headless -u NONE -i NONE -l "$root/tests/picker.lua"
 nvim --headless -u NONE -i NONE -l "$root/tests/integration.lua"
